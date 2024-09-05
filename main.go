@@ -41,6 +41,8 @@ func main() {
 		ThumbnailHandler(w, r, client.Database("bdmdm"))
 	}).Methods("GET")
 
+	r.HandleFunc("/donacion", DonacionHandler).Methods("POST") // Actualización aquí: DonacionHandler no necesita el bucket
+
 	// Configuración de CORS usando handlers.CORS
 	corsHandler := handlers.CORS(
 		handlers.AllowedOrigins([]string{"*"}),                      // Permite solicitudes desde localhost:3000

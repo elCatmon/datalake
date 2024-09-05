@@ -4,8 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
@@ -185,4 +190,103 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	// Devolver la lista de URLs de las miniaturas
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(images)
+}
+
+// DonacionHandler maneja la solicitud para cargar archivos a una carpeta local.
+// DonacionHandler maneja la solicitud para cargar archivos y ejecutar el script de Python.
+func DonacionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Método de solicitud no permitido", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Aumentar el límite de tamaño de los archivos a 50 MB
+	err := r.ParseMultipartForm(50 << 20) // Limita a 50 MB
+	if err != nil {
+		http.Error(w, "No se pudo procesar el formulario", http.StatusBadRequest)
+		return
+	}
+
+	// Recuperar los archivos del formulario
+	files := r.MultipartForm.File["files"]
+	tipoEstudio := r.FormValue("tipoEstudio")
+
+	if len(files) == 0 {
+		http.Error(w, "No se proporcionaron archivos", http.StatusBadRequest)
+		return
+	}
+
+	if tipoEstudio == "" {
+		http.Error(w, "Tipo de estudio no proporcionado", http.StatusBadRequest)
+		return
+	}
+
+	// Guardar los archivos en el directorio
+	for _, file := range files {
+		f, err := file.Open()
+		if err != nil {
+			http.Error(w, "No se pudo abrir el archivo", http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+
+		dst, err := os.Create(filepath.Join(uploadDir, file.Filename))
+		if err != nil {
+			http.Error(w, "No se pudo guardar el archivo", http.StatusInternalServerError)
+			return
+		}
+		defer dst.Close()
+
+		_, err = io.Copy(dst, f)
+		if err != nil {
+			http.Error(w, "Error al guardar el archivo", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Ejecutar el script de Python para anonimizar cada archivo en el directorio
+	err = processFilesInDirectory(uploadDir)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error al ejecutar el script de Python: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, "Archivos subidos y anonimización completada exitosamente")
+}
+
+func processFilesInDirectory(directory string) error {
+	// Lee el directorio especificado
+	files, err := os.ReadDir(directory)
+	if err != nil {
+		return fmt.Errorf("error al leer el directorio: %v", err)
+	}
+
+	// Determina la ruta del script de Python
+	scriptPath := filepath.Join("services", "anonimizacion.py") // Ajusta si el script está en una ubicación diferente
+
+	// Determina la ruta del ejecutable de Python
+	var pythonExecutable string
+	switch runtime.GOOS {
+	case "windows":
+		pythonExecutable = "python" // o "python3" dependiendo de tu configuración
+	case "linux", "darwin":
+		pythonExecutable = "python3"
+	default:
+		return fmt.Errorf("sistema operativo no soportado: %s", runtime.GOOS)
+	}
+
+	for _, file := range files {
+		if !file.IsDir() {
+			filePath := filepath.Join(directory, file.Name())
+
+			// Ejecuta el script de Python con la ruta del archivo como argumento
+			cmd := exec.Command(pythonExecutable, scriptPath, filePath)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("error al ejecutar el script de Python para el archivo %s: %v\nOutput: %s", file.Name(), err, output)
+			}
+		}
+	}
+	return nil
 }
