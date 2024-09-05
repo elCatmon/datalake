@@ -171,7 +171,7 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 		// Obtener el nombre del archivo y construir la URL
 		filename, ok := fileInfo["filename"].(string)
 		if ok {
-			imageURL := "http://192.168.100.5:8080/image/" + filename
+			imageURL := ip + "/image/" + filename
 
 			images = append(images, imageURL)
 		}

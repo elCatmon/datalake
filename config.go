@@ -12,6 +12,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+var ip = "http://10.0.29.64:8080"
+
 // InitializeDatabase configura la conexión a PostgreSQL.
 func InitializeDatabase() *sql.DB {
 	connStr := "user=postgres dbname=datalake password=123456789 sslmode=disable" // Reemplaza con tus credenciales
