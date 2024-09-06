@@ -10,15 +10,12 @@ import (
 	"image/jpeg"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
 	"strconv"
 	"time"
 
 	"github.com/disintegration/imaging"
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/gridfs"
 	"golang.org/x/crypto/bcrypt"
@@ -273,28 +270,28 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 		defer file.Close()
 
 		// Convertir la imagen JPG original a DICOM
-		dicomData, err := convertJPGtoDICOM(file)
-		if err != nil {
-			http.Error(w, "Failed to convert JPG to DICOM", http.StatusInternalServerError)
-			fmt.Println("Error converting JPG to DICOM:", err)
-			return
-		}
+		//dicomData, err := convertJPGtoDICOM(file)
+		//if err != nil {
+		//	http.Error(w, "Failed to convert JPG to DICOM", http.StatusInternalServerError)
+		//	fmt.Println("Error converting JPG to DICOM:", err)
+		//	return
+		//}
 
 		// Subir el DICOM a GridFS
-		dicomUploadStream, err := bucket.OpenUploadStream(fileHeader.Filename + ".dcm")
-		if err != nil {
-			http.Error(w, "Failed to upload DICOM to GridFS", http.StatusInternalServerError)
-			fmt.Println("Error uploading DICOM to GridFS:", err)
-			return
-		}
-		defer dicomUploadStream.Close()
+		//dicomUploadStream, err := bucket.OpenUploadStream(fileHeader.Filename + ".dcm")
+		//if err != nil {
+		//	http.Error(w, "Failed to upload DICOM to GridFS", http.StatusInternalServerError)
+		//	fmt.Println("Error uploading DICOM to GridFS:", err)
+		//	return
+		//}
+		//defer dicomUploadStream.Close()
 
-		_, err = io.Copy(dicomUploadStream, dicomData)
-		if err != nil {
-			http.Error(w, "Failed to write DICOM to GridFS", http.StatusInternalServerError)
-			fmt.Println("Error copying DICOM to GridFS:", err)
-			return
-		}
+		//_, err = io.Copy(dicomUploadStream, dicomData)
+		//if err != nil {
+		//	http.Error(w, "Failed to write DICOM to GridFS", http.StatusInternalServerError)
+		//	fmt.Println("Error copying DICOM to GridFS:", err)
+		//	return
+		//}
 
 		// Redimensionar la imagen JPG original a 128x128 píxeles
 		img, _, err := image.Decode(file)
@@ -304,7 +301,7 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 			return
 		}
 
-		resizedImg := imaging.Resize(img, 128, 128, imaging.Lanczos)
+		resizedImg := imaging.Resize(img, 4096, 4096, imaging.Lanczos)
 
 		var resizedImageBuf bytes.Buffer
 		if err := jpeg.Encode(&resizedImageBuf, resizedImg, nil); err != nil {
@@ -330,17 +327,17 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 		}
 
 		// Convertir el ID a `primitive.ObjectID` y obtener su representación en hexadecimal
-		fileID := uploadStream.FileID.(primitive.ObjectID)
-		dicomFileID := dicomUploadStream.FileID.(primitive.ObjectID)
+		//fileID := uploadStream.FileID.(primitive.ObjectID)
+		//dicomFileID := dicomUploadStream.FileID.(primitive.ObjectID)
 
 		// Agregar la referencia al archivo subido (ID de GridFS)
-		fmt.Println("Image uploaded successfully:", fileHeader.Filename, "with ID:", fileID.Hex())
-		fmt.Println("DICOM uploaded successfully:", fileHeader.Filename+".dcm", "with ID:", dicomFileID.Hex())
+		//fmt.Println("Image uploaded successfully:", fileHeader.Filename, "with ID:", fileID.Hex())
+		//fmt.Println("DICOM uploaded successfully:", fileHeader.Filename+".dcm", "with ID:", dicomFileID.Hex())
 
-		imagenes = append(imagenes, Imagen{
-			Dicom:  dicomFileID.Hex(), // Guardar el ID de GridFS del DICOM en el campo Dicom
-			Imagen: fileID.Hex(),      // Guardar el ID de GridFS de la imagen redimensionada en el campo Imagen
-		})
+		//imagenes = append(imagenes, Imagen{
+		//	Dicom:  dicomFileID.Hex(), // Guardar el ID de GridFS del DICOM en el campo Dicom
+		//	Imagen: fileID.Hex(),      // Guardar el ID de GridFS de la imagen redimensionada en el campo Imagen
+		//})
 	}
 
 	// Crear el documento de estudio
@@ -376,38 +373,38 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 }
 
 // convertJPGtoDICOM convierte una imagen JPG a DICOM ejecutando un script Python.
-func convertJPGtoDICOM(imgData io.Reader) (io.Reader, error) {
-	// Crear un archivo temporal para almacenar la imagen JPG
-	imgFile, err := os.CreateTemp("", "*.jpg")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp JPG file: %w", err)
-	}
-	defer os.Remove(imgFile.Name())
+//func convertJPGtoDICOM(imgData io.Reader) (io.Reader, error) {
+//	// Crear un archivo temporal para almacenar la imagen JPG
+//	imgFile, err := os.CreateTemp("", "*.jpg")
+//	if err != nil {
+//		return nil, fmt.Errorf("failed to create temp JPG file: %w", err)
+//	}
+//	defer os.Remove(imgFile.Name())
 
-	// Copiar los datos de la imagen al archivo temporal
-	_, err = io.Copy(imgFile, imgData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to write JPG to temp file: %w", err)
-	}
-	imgFile.Close()
+//	// Copiar los datos de la imagen al archivo temporal
+//	_, err = io.Copy(imgFile, imgData)
+//	if err != nil {
+//		return nil, fmt.Errorf("failed to write JPG to temp file: %w", err)
+//	}
+//	imgFile.Close()
+//
+//	// Ejecutar el script Python para convertir JPG a DICOM
+//	dicomFile := imgFile.Name() + ".dcm"
+//	cmd := exec.Command("python", "convert_jpg_to_dicom.py", imgFile.Name(), dicomFile)
+//	var out bytes.Buffer
+//	cmd.Stdout = &out
+//	var stderr bytes.Buffer
+//	cmd.Stderr = &stderr
+//	err = cmd.Run()
+//	if err != nil {
+//		return nil, fmt.Errorf("conversion failed: %s", stderr.String())
+//	}
 
-	// Ejecutar el script Python para convertir JPG a DICOM
-	dicomFile := imgFile.Name() + ".dcm"
-	cmd := exec.Command("python", "convert_jpg_to_dicom.py", imgFile.Name(), dicomFile)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	err = cmd.Run()
-	if err != nil {
-		return nil, fmt.Errorf("conversion failed: %s", stderr.String())
-	}
+// Leer el archivo DICOM generado
+//	dicomData, err := os.Open(dicomFile)
+//	if err != nil {
+//		return nil, fmt.Errorf("failed to open DICOM file: %w", err)
+//	}
 
-	// Leer el archivo DICOM generado
-	dicomData, err := os.Open(dicomFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open DICOM file: %w", err)
-	}
-
-	return dicomData, nil
-}
+//	return dicomData, nil
+//}
