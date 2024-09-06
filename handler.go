@@ -12,13 +12,8 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-<<<<<<< Updated upstream
-	"path/filepath"
-	"runtime"
-=======
 	"strconv"
 	"time"
->>>>>>> Stashed changes
 
 	"github.com/disintegration/imaging"
 	"github.com/gorilla/mux"
@@ -202,39 +197,22 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	json.NewEncoder(w).Encode(images)
 }
 
-<<<<<<< Updated upstream
-// DonacionHandler maneja la solicitud para cargar archivos a una carpeta local.
-// DonacionHandler maneja la solicitud para cargar archivos y ejecutar el script de Python.
-func DonacionHandler(w http.ResponseWriter, r *http.Request) {
-=======
 func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket, database *mongo.Database) {
->>>>>>> Stashed changes
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
-<<<<<<< Updated upstream
-	// Aumentar el límite de tamaño de los archivos a 50 MB
-	err := r.ParseMultipartForm(50 << 20) // Limita a 50 MB
-=======
 	// Parsear el formulario multipart para manejar archivos grandes (hasta 10MB)
 	err := r.ParseMultipartForm(10 << 20)
->>>>>>> Stashed changes
 	if err != nil {
 		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		fmt.Println("Error parsing form data:", err)
 		return
 	}
 
-<<<<<<< Updated upstream
-	// Recuperar los archivos del formulario
-	files := r.MultipartForm.File["files"]
-	tipoEstudio := r.FormValue("tipoEstudio")
-=======
 	formData := r.MultipartForm
 	fmt.Println("Form Data:", formData) // Verifica lo que se recibe en el formulario
->>>>>>> Stashed changes
 
 	// Verificar si los valores claves están presentes
 	if len(formData.Value["estudio_ID"]) == 0 || len(formData.Value["sexo"]) == 0 {
@@ -284,76 +262,6 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 
 	fmt.Println("Number of images received:", len(files))
 
-<<<<<<< Updated upstream
-	// Guardar los archivos en el directorio
-	for _, file := range files {
-		f, err := file.Open()
-		if err != nil {
-			http.Error(w, "No se pudo abrir el archivo", http.StatusInternalServerError)
-			return
-		}
-		defer f.Close()
-
-		dst, err := os.Create(filepath.Join(uploadDir, file.Filename))
-		if err != nil {
-			http.Error(w, "No se pudo guardar el archivo", http.StatusInternalServerError)
-			return
-		}
-		defer dst.Close()
-
-		_, err = io.Copy(dst, f)
-		if err != nil {
-			http.Error(w, "Error al guardar el archivo", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	// Ejecutar el script de Python para anonimizar cada archivo en el directorio
-	err = processFilesInDirectory(uploadDir)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Error al ejecutar el script de Python: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "Archivos subidos y anonimización completada exitosamente")
-}
-
-func processFilesInDirectory(directory string) error {
-	// Lee el directorio especificado
-	files, err := os.ReadDir(directory)
-	if err != nil {
-		return fmt.Errorf("error al leer el directorio: %v", err)
-	}
-
-	// Determina la ruta del script de Python
-	scriptPath := filepath.Join("services", "anonimizacion.py") // Ajusta si el script está en una ubicación diferente
-
-	// Determina la ruta del ejecutable de Python
-	var pythonExecutable string
-	switch runtime.GOOS {
-	case "windows":
-		pythonExecutable = "python" // o "python3" dependiendo de tu configuración
-	case "linux", "darwin":
-		pythonExecutable = "python3"
-	default:
-		return fmt.Errorf("sistema operativo no soportado: %s", runtime.GOOS)
-	}
-
-	for _, file := range files {
-		if !file.IsDir() {
-			filePath := filepath.Join(directory, file.Name())
-
-			// Ejecuta el script de Python con la ruta del archivo como argumento
-			cmd := exec.Command(pythonExecutable, scriptPath, filePath)
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("error al ejecutar el script de Python para el archivo %s: %v\nOutput: %s", file.Name(), err, output)
-			}
-		}
-	}
-	return nil
-=======
 	var imagenes []Imagen
 	for _, fileHeader := range files {
 		file, err := fileHeader.Open()
@@ -502,5 +410,4 @@ func convertJPGtoDICOM(imgData io.Reader) (io.Reader, error) {
 	}
 
 	return dicomData, nil
->>>>>>> Stashed changes
 }
