@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"time"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
@@ -191,23 +194,18 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(images)
 }
-
-// DonacionHandler maneja la solicitud para cargar archivos a una carpeta local.
-// DonacionHandler maneja la solicitud para cargar archivos y ejecutar el script de Python.
 func DonacionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Método de solicitud no permitido", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Aumentar el límite de tamaño de los archivos a 50 MB
 	err := r.ParseMultipartForm(50 << 20) // Limita a 50 MB
 	if err != nil {
 		http.Error(w, "No se pudo procesar el formulario", http.StatusBadRequest)
 		return
 	}
 
-	// Recuperar los archivos del formulario
 	files := r.MultipartForm.File["files"]
 	tipoEstudio := r.FormValue("tipoEstudio")
 
@@ -221,7 +219,6 @@ func DonacionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Guardar los archivos en el directorio
 	for _, file := range files {
 		f, err := file.Open()
 		if err != nil {
@@ -244,7 +241,6 @@ func DonacionHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Ejecutar el script de Python para anonimizar cada archivo en el directorio
 	err = processFilesInDirectory(uploadDir)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error al ejecutar el script de Python: %v", err), http.StatusInternalServerError)
@@ -256,31 +252,23 @@ func DonacionHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func processFilesInDirectory(directory string) error {
-	// Lee el directorio especificado
 	files, err := os.ReadDir(directory)
 	if err != nil {
 		return fmt.Errorf("error al leer el directorio: %v", err)
 	}
 
-	// Determina la ruta del script de Python
-	scriptPath := filepath.Join("services", "anonimizacion.py") // Ajusta si el script está en una ubicación diferente
-
-	// Determina la ruta del ejecutable de Python
+	scriptPath := filepath.Join("services", "anonimizacion.py")
 	var pythonExecutable string
 	switch runtime.GOOS {
 	case "windows":
-		pythonExecutable = "python" // o "python3" dependiendo de tu configuración
+		pythonExecutable = "python"
 	case "linux", "darwin":
 		pythonExecutable = "python3"
-	default:
-		return fmt.Errorf("sistema operativo no soportado: %s", runtime.GOOS)
 	}
 
 	for _, file := range files {
 		if !file.IsDir() {
 			filePath := filepath.Join(directory, file.Name())
-
-			// Ejecuta el script de Python con la ruta del archivo como argumento
 			cmd := exec.Command(pythonExecutable, scriptPath, filePath)
 			output, err := cmd.CombinedOutput()
 			if err != nil {
@@ -289,4 +277,150 @@ func processFilesInDirectory(directory string) error {
 		}
 	}
 	return nil
+}
+
+func downloadBlob(url string) (string, error) {
+	tempFile, err := os.CreateTemp("", "downloaded-*.jpg")
+	if err != nil {
+		return "", err
+	}
+	defer tempFile.Close()
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("descarga fallida con estado %d", resp.StatusCode)
+	}
+
+	_, err = io.Copy(tempFile, resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	return tempFile.Name(), nil
+}
+
+func convertImagenes(rawImagenes []struct {
+	Dicom  string `json:"dicom"`
+	Imagen string `json:"imagen"`
+}) []Imagen {
+	var imagenes []Imagen
+	for _, img := range rawImagenes {
+		imagenes = append(imagenes, Imagen{
+			Dicom:  img.Dicom,
+			Imagen: img.Imagen,
+		})
+	}
+	return imagenes
+}
+
+func convertDiagnostico(rawDiagnostico []struct {
+	Proyeccion string `json:"proyeccion"`
+	Hallazgos  string `json:"hallazgos"`
+}) []Diagnostico {
+	var diagnosticos []Diagnostico
+	for _, diag := range rawDiagnostico {
+		diagnosticos = append(diagnosticos, Diagnostico{
+			Proyeccion: diag.Proyeccion,
+			Hallazgos:  diag.Hallazgos,
+		})
+	}
+	return diagnosticos
+}
+
+func UploadEstudioHandler(db *mongo.Database, bucket *gridfs.Bucket) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var estudioData struct {
+			EstudioID       string `json:"estudio_ID"`
+			Hash            string `json:"hash"`
+			Estudio         string `json:"estudio"`
+			Sexo            string `json:"sexo"`
+			Edad            string `json:"edad"`
+			FechaNacimiento string `json:"fecha_nacimiento"`
+			Imagenes        []struct {
+				Dicom  string `json:"dicom"`
+				Imagen string `json:"imagen"`
+			} `json:"imagenes"`
+			Diagnostico []struct {
+				Proyeccion string `json:"proyeccion"`
+				Hallazgos  string `json:"hallazgos"`
+			} `json:"diagnostico"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&estudioData); err != nil {
+			log.Printf("Error decoding request body: %v", err)
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		// Log data decoded
+		log.Printf("Decoded Estudio Data: %+v", estudioData)
+
+		edad, err := strconv.Atoi(estudioData.Edad)
+		if err != nil {
+			log.Printf("Error converting Edad to int: %v", err)
+			http.Error(w, "Invalid edad format", http.StatusBadRequest)
+			return
+		}
+
+		fechaNacimiento, err := time.Parse("2006-01-02", estudioData.FechaNacimiento)
+		if err != nil {
+			log.Printf("Error parsing FechaNacimiento: %v", err)
+			http.Error(w, "Invalid date format", http.StatusBadRequest)
+			return
+		}
+
+		scriptConvPath := filepath.Join("services", "jpg_dcm.py")
+
+		var pythonExecutable string
+		switch runtime.GOOS {
+		case "windows":
+			pythonExecutable = "python"
+		case "linux", "darwin":
+			pythonExecutable = "python3"
+		}
+
+		for i, img := range estudioData.Imagenes {
+			i = i
+			jpgFilePath, err := downloadBlob(img.Imagen)
+			if err != nil {
+				log.Printf("Error downloading image: %v", err)
+				http.Error(w, "Error downloading image", http.StatusInternalServerError)
+				return
+			}
+			defer os.Remove(jpgFilePath)
+
+			cmd := exec.Command(pythonExecutable, scriptConvPath, jpgFilePath)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				log.Printf("Error executing Python script: %v\nOutput: %s", err, output)
+				http.Error(w, "Error processing image", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		collection := db.Collection("estudios")
+		_, err = collection.InsertOne(context.TODO(), EstudioDocument{
+			EstudioID:       estudioData.EstudioID,
+			Hash:            estudioData.Hash,
+			Estudio:         estudioData.Estudio,
+			Sexo:            estudioData.Sexo,
+			Edad:            edad,
+			FechaNacimiento: fechaNacimiento,
+			Imagenes:        convertImagenes(estudioData.Imagenes),
+			Diagnostico:     convertDiagnostico(estudioData.Diagnostico),
+		})
+		if err != nil {
+			log.Printf("Error inserting document into MongoDB: %v", err)
+			http.Error(w, "Error saving to database", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "Estudio cargado exitosamente")
+	}
 }

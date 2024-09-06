@@ -5,16 +5,16 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/gorilla/handlers" // Importa el paquete de handlers
+	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 )
 
 func main() {
 	// Inicializar la base de datos y el cliente MongoDB
-	db := InitializeDatabase()
+	db := InitializeDatabase() // Verifica esta función
 	defer db.Close()
 
-	client, _, bucket := InitializeMongoDBClient()
+	client, database, bucket := InitializeMongoDBClient() // Asegúrate de que esta función esté bien implementada
 	defer client.Disconnect(context.Background())
 
 	// Crear un enrutador y configurar rutas
@@ -41,11 +41,13 @@ func main() {
 		ThumbnailHandler(w, r, client.Database("bdmdm"))
 	}).Methods("GET")
 
-	r.HandleFunc("/donacion", DonacionHandler).Methods("POST") // Actualización aquí: DonacionHandler no necesita el bucket
+	r.HandleFunc("/estudios", UploadEstudioHandler(database, bucket)).Methods("POST")
+
+	r.HandleFunc("/donacion", DonacionHandler).Methods("POST")
 
 	// Configuración de CORS usando handlers.CORS
 	corsHandler := handlers.CORS(
-		handlers.AllowedOrigins([]string{"*"}),                      // Permite solicitudes desde localhost:3000
+		handlers.AllowedOrigins([]string{"*"}),                      // Permite solicitudes desde cualquier origen
 		handlers.AllowedMethods([]string{"GET", "POST", "OPTIONS"}), // Permite los métodos necesarios
 		handlers.AllowedHeaders([]string{"Content-Type"}),           // Permite los headers necesarios
 	)(r)
