@@ -41,7 +41,14 @@ func main() {
 		ThumbnailHandler(w, r, client.Database("bdmdm"))
 	}).Methods("GET")
 
+<<<<<<< Updated upstream
 	r.HandleFunc("/donacion", DonacionHandler).Methods("POST") // Actualización aquí: DonacionHandler no necesita el bucket
+=======
+	// Ruta para importar archivos y datos
+	r.HandleFunc("/importar", func(w http.ResponseWriter, r *http.Request) {
+		handleImportar(w, r, bucket, database)
+	}).Methods("POST")
+>>>>>>> Stashed changes
 
 	// Configuración de CORS usando handlers.CORS
 	corsHandler := handlers.CORS(

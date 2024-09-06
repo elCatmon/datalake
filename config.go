@@ -14,7 +14,7 @@ import (
 
 var ip = "http://10.0.29.64:8080"
 
-const uploadDir = "./archivosSub"
+//const uploadDir = "./archivosSub"
 
 // InitializeDatabase configura la conexión a PostgreSQL.
 func InitializeDatabase() *sql.DB {

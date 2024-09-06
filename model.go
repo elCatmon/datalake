@@ -60,7 +60,6 @@ type Consultas struct {
 	Consulta   string    `json:"consulta"`
 }
 
-// FileDocument representa un documento en la colección `imagenes.files`.
 type FileDocument struct {
 	ID          primitive.ObjectID `bson:"_id"`
 	Filename    string             `bson:"filename"`
