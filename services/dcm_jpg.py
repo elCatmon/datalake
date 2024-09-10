@@ -31,7 +31,7 @@ def dicom_to_jpeg(file_path):
             if img.mode != 'L':
                 img = img.convert('L')
             # Redimensionar la imagen si es necesario
-            img = img.resize((128, 128), Image.LANCZOS)
+            img = img.resize((4096, 4096), Image.LANCZOS)
             # Guardar la imagen como JPEG
             img.save(output_file, "JPEG")
         else:

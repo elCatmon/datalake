@@ -6,14 +6,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/gridfs"
 	"golang.org/x/crypto/bcrypt"
@@ -151,48 +154,140 @@ func ImageHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket)
 
 // ThumbnailHandler maneja la solicitud para obtener las miniaturas de imágenes JPG.
 func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+	// Obtener la colección de estudios
+	studiesCollection := db.Collection("estudios")
+
+	// Obtener parámetros de consulta
+	queryParams := r.URL.Query()
+	tipoEstudio := queryParams.Get("tipoEstudio")
+	region := queryParams.Get("region")
+	edadMin := queryParams.Get("edadMin")
+	edadMax := queryParams.Get("edadMax")
+	sexo := queryParams.Get("sexo")
+
+	// Crear el filtro de búsqueda para estudios
+	filter := bson.M{
+		"imagenes": bson.M{
+			"$elemMatch": bson.M{
+				"anonimizada": true,
+			},
+		},
+		"status": "Aceptado",
+	}
+
+	// Agregar filtros opcionales a la consulta de estudios
+	if tipoEstudio != "" {
+		filter["estudio"] = tipoEstudio
+	}
+	if region != "" {
+		filter["region"] = region
+	}
+	if edadMin != "" {
+		edadMinInt, err := strconv.Atoi(edadMin)
+		if err != nil {
+			http.Error(w, "Edad mínima inválida", http.StatusBadRequest)
+			return
+		}
+		filter["edad"] = bson.M{"$gte": edadMinInt}
+	}
+	if edadMax != "" {
+		edadMaxInt, err := strconv.Atoi(edadMax)
+		if err != nil {
+			http.Error(w, "Edad máxima inválida", http.StatusBadRequest)
+			return
+		}
+		filter["edad"] = bson.M{"$lte": edadMaxInt}
+	}
+	if sexo != "" {
+		filter["sexo"] = sexo
+	}
+
+	// Buscar los estudios que cumplen con el filtro
+	cursor, err := studiesCollection.Find(context.Background(), filter)
+	if err != nil {
+		http.Error(w, "Error al buscar estudios en la base de datos: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	// Recolectar IDs de imágenes que cumplen con los criterios
+	var imageIDs []primitive.ObjectID
+	for cursor.Next(context.Background()) {
+		var study EstudioDocument
+		if err := cursor.Decode(&study); err != nil {
+			http.Error(w, "Error al decodificar estudio: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		for _, img := range study.Imagenes {
+			if img.Anonimizada {
+				imageID, err := primitive.ObjectIDFromHex(img.Imagen)
+				if err != nil {
+					http.Error(w, "Error al convertir ID de imagen: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				imageIDs = append(imageIDs, imageID)
+			}
+		}
+	}
+
+	if err := cursor.Err(); err != nil {
+		http.Error(w, "Error al iterar sobre los estudios: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(imageIDs) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]string{})
+		return
+	}
+
 	// Obtener la colección de archivos GridFS
 	imagesCollection := db.Collection("imagenes.files")
 
-	// Filtrar solo archivos que terminan en .jpg
-	filter := bson.M{"filename": bson.M{"$regex": `\.jpg$`}}
+	// Filtrar archivos con IDs en imageIDs y que terminen en .jpg
+	filter = bson.M{
+		"_id":      bson.M{"$in": imageIDs},
+		"filename": bson.M{"$regex": `\.jpg$`},
+	}
 
 	// Buscar los archivos en la colección usando el filtro
-	cursor, err := imagesCollection.Find(context.Background(), filter)
+	cursor, err = imagesCollection.Find(context.Background(), filter)
 	if err != nil {
-		http.Error(w, "Error al buscar archivos en la base de datos", http.StatusInternalServerError)
+		http.Error(w, "Error al buscar archivos en la base de datos: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer cursor.Close(context.Background())
 
 	var images []string
 	for cursor.Next(context.Background()) {
-		var fileInfo bson.M
+		var fileInfo FileDocument
 		if err := cursor.Decode(&fileInfo); err != nil {
-			http.Error(w, "Error al decodificar archivo", http.StatusInternalServerError)
+			http.Error(w, "Error al decodificar archivo: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		// Obtener el nombre del archivo y construir la URL
-		filename, ok := fileInfo["filename"].(string)
-		if ok {
+		filename := fileInfo.Filename
+		if filename != "" {
 			imageURL := ip + "/image/" + filename
-
 			images = append(images, imageURL)
 		}
 	}
 
 	if err := cursor.Err(); err != nil {
-		http.Error(w, "Error al iterar sobre los archivos", http.StatusInternalServerError)
+		http.Error(w, "Error al iterar sobre los archivos: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Devolver la lista de URLs de las miniaturas
 	w.Header().Set("Content-Type", "application/json")
+	if len(images) == 0 {
+		log.Println("No se encontraron imágenes que coincidan con los filtros.")
+	}
 	json.NewEncoder(w).Encode(images)
 }
 
-// DonacionHandler maneja la solicitud para cargar archivos a una carpeta local.
 // DonacionHandler maneja la solicitud para cargar archivos y ejecutar el script de Python.
 func DonacionHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

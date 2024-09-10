@@ -16,7 +16,7 @@ def jpg_to_dicom(file_path):
         img = img.convert('L')  # Convertir a escala de grises
 
         # Redimensionar la imagen a 4096x4096
-        img = img.resize((2048, 2048))
+        img = img.resize((4096, 4096))
 
         np_img = np.array(img)
 
