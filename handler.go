@@ -1,19 +1,23 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"image"
+	"image/jpeg"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
+	"time"
 
+	"github.com/disintegration/imaging"
 	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -287,101 +291,256 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	}
 	json.NewEncoder(w).Encode(images)
 }
-
-// DonacionHandler maneja la solicitud para cargar archivos y ejecutar el script de Python.
-func DonacionHandler(w http.ResponseWriter, r *http.Request) {
+func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket, database *mongo.Database) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Método de solicitud no permitido", http.StatusMethodNotAllowed)
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Aumentar el límite de tamaño de los archivos a 50 MB
-	err := r.ParseMultipartForm(50 << 20) // Limita a 50 MB
+	// Limitar el tamaño del archivo a 50 MB
+	err := r.ParseMultipartForm(50 << 20)
 	if err != nil {
-		http.Error(w, "No se pudo procesar el formulario", http.StatusBadRequest)
+		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
+		log.Println("Error parsing form data:", err)
 		return
 	}
 
-	// Recuperar los archivos del formulario
-	files := r.MultipartForm.File["files"]
-	tipoEstudio := r.FormValue("tipoEstudio")
+	formData := r.MultipartForm
+	log.Println("Form Data:", formData)
 
-	if len(files) == 0 {
-		http.Error(w, "No se proporcionaron archivos", http.StatusBadRequest)
-		return
-	}
-
-	if tipoEstudio == "" {
-		http.Error(w, "Tipo de estudio no proporcionado", http.StatusBadRequest)
-		return
-	}
-
-	// Guardar los archivos en el directorio
-	for _, file := range files {
-		f, err := file.Open()
-		if err != nil {
-			http.Error(w, "No se pudo abrir el archivo", http.StatusInternalServerError)
-			return
-		}
-		defer f.Close()
-
-		dst, err := os.Create(filepath.Join(uploadDir, file.Filename))
-		if err != nil {
-			http.Error(w, "No se pudo guardar el archivo", http.StatusInternalServerError)
-			return
-		}
-		defer dst.Close()
-
-		_, err = io.Copy(dst, f)
-		if err != nil {
-			http.Error(w, "Error al guardar el archivo", http.StatusInternalServerError)
-			return
-		}
-	}
-
-	// Ejecutar el script de Python para anonimizar cada archivo en el directorio
-	err = processFilesInDirectory(uploadDir)
+	// Verificar campos obligatorios
+	estudioID, err := getValueOrError(formData.Value, "estudio_ID")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error al ejecutar el script de Python: %v", err), http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "Archivos subidos y anonimización completada exitosamente")
+	estudio, err := getValueOrError(formData.Value, "estudio")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	region, err := getValueOrError(formData.Value, "region")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	sexo, err := getValueOrError(formData.Value, "sexo")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	edadStr, err := getValueOrError(formData.Value, "edad")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	fechaNacimiento, err := getValueOrError(formData.Value, "fecha_nacimiento")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	FechaEstudio, err := getValueOrError(formData.Value, "fecha_estudio")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	proyeccion, err := getValueOrError(formData.Value, "proyeccion")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	hallazgos := formData.Value["hallazgos"]
+	if len(hallazgos) == 0 {
+		hallazgos = []string{"N/A"} // Valor por defecto si hallazgos no está presente
+	}
+
+	donador, err := getValueOrError(formData.Value, "donador")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	numeroOperacion, err := getValueOrError(formData.Value, "estudio_ID")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Conversión de edad
+	edad, err := strconv.Atoi(edadStr)
+	if err != nil {
+		http.Error(w, "Invalid age format", http.StatusBadRequest)
+		log.Println("Invalid age format:", err)
+		return
+	}
+
+	// Conversión de fecha
+	fechaNacimientoParsed, err := time.Parse("2006-01-02", fechaNacimiento)
+	if err != nil {
+		http.Error(w, "Invalid date format", http.StatusBadRequest)
+		log.Println("Invalid date format:", err)
+		return
+	}
+
+	// Conversión de fecha
+	fechaEstudioParsed, err := time.Parse("2006-01-02", FechaEstudio)
+	if err != nil {
+		http.Error(w, "Invalid date format", http.StatusBadRequest)
+		log.Println("Invalid date format:", err)
+		return
+	}
+
+	// Generar el hash a partir del nombre del donador y el número de operación
+	hash := generateHash(donador, numeroOperacion)
+	log.Println("Generated Hash:", hash)
+
+	// Procesamiento de archivos originales
+	originalFiles := formData.File["archivosOriginales"]
+	anonymizedFiles := formData.File["archivosAnonimizados"]
+
+	if originalFiles == nil || anonymizedFiles == nil {
+		http.Error(w, "No images field found", http.StatusBadRequest)
+		log.Println("No 'archivosOriginales' or 'archivosAnonimizados' field found in form data")
+		return
+	}
+
+	log.Println("Original Files received:", len(originalFiles))
+	log.Println("Anonymized Files received:", len(anonymizedFiles))
+
+	if len(originalFiles) == 0 || len(anonymizedFiles) == 0 {
+		http.Error(w, "No images uploaded", http.StatusBadRequest)
+		log.Println("No images received")
+		return
+	}
+
+	var imagenes []Imagen
+
+	// Subir archivos originales
+	for _, fileHeader := range originalFiles {
+		log.Printf("Processing original file: %s", fileHeader.Filename)
+
+		fileID, err := uploadFileToGridFS(fileHeader, bucket)
+		if err != nil {
+			http.Error(w, "Failed to upload original file", http.StatusInternalServerError)
+			return
+		}
+
+		imagenes = append(imagenes, Imagen{
+			Imagen:      fileID,
+			Anonimizada: false, // Archivo original
+		})
+	}
+
+	// Subir archivos anonimizados
+	for _, fileHeader := range anonymizedFiles {
+		log.Printf("Processing anonymized file: %s", fileHeader.Filename)
+
+		fileID, err := uploadFileToGridFS(fileHeader, bucket)
+		if err != nil {
+			http.Error(w, "Failed to upload anonymized file", http.StatusInternalServerError)
+			return
+		}
+
+		imagenes = append(imagenes, Imagen{
+			Imagen:      fileID,
+			Anonimizada: true, // Archivo anonimizado
+		})
+	}
+
+	// Crear el documento del estudio
+	estudioDoc := EstudioDocument{
+		EstudioID:       estudioID,
+		Region:          region,
+		Hash:            hash, // Asignar el hash generado
+		Status:          "No Aceptado",
+		Estudio:         estudio,
+		Sexo:            sexo,
+		Edad:            edad,
+		FechaNacimiento: fechaNacimientoParsed,
+		FechaEstudio:    fechaEstudioParsed,
+		Imagenes:        imagenes,
+		Diagnostico: []Diagnostico{
+			{
+				Proyeccion: proyeccion,
+				Hallazgos:  hallazgos[0],
+			},
+		},
+	}
+
+	// Insertar el documento en MongoDB
+	collection := database.Collection("estudios")
+	_, err = collection.InsertOne(r.Context(), estudioDoc)
+	if err != nil {
+		http.Error(w, "Failed to insert document", http.StatusInternalServerError)
+		log.Println("Error inserting document into MongoDB:", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	response := map[string]string{"message": "Data successfully inserted"}
+	json.NewEncoder(w).Encode(response)
 }
 
-func processFilesInDirectory(directory string) error {
-	// Lee el directorio especificado
-	files, err := os.ReadDir(directory)
+// Función para obtener valores del formulario o devolver un error si el campo no existe
+func getValueOrError(formData map[string][]string, key string) (string, error) {
+	values, ok := formData[key]
+	if !ok || len(values) == 0 {
+		return "", errors.New("Missing or empty field: " + key)
+	}
+	return values[0], nil
+}
+
+// Función para generar un hash SHA-256
+func generateHash(donador, numOperacion string) string {
+	hashInput := donador + numOperacion
+	hash := sha256.New()
+	hash.Write([]byte(hashInput))
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+// Función para subir archivos a GridFS
+func uploadFileToGridFS(fileHeader *multipart.FileHeader, bucket *gridfs.Bucket) (string, error) {
+	file, err := fileHeader.Open()
 	if err != nil {
-		return fmt.Errorf("error al leer el directorio: %v", err)
+		log.Println("Error opening file:", err)
+		return "", err
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		log.Println("Error decoding image:", err)
+		return "", err
 	}
 
-	// Determina la ruta del script de Python
-	scriptPath := filepath.Join("services", "anonimizacion.py") // Ajusta si el script está en una ubicación diferente
+	resizedImg := imaging.Resize(img, 4096, 4096, imaging.Lanczos)
 
-	// Determina la ruta del ejecutable de Python
-	var pythonExecutable string
-	switch runtime.GOOS {
-	case "windows":
-		pythonExecutable = "python" // o "python3" dependiendo de tu configuración
-	case "linux", "darwin":
-		pythonExecutable = "python3"
-	default:
-		return fmt.Errorf("sistema operativo no soportado: %s", runtime.GOOS)
+	var resizedImageBuf bytes.Buffer
+	if err := jpeg.Encode(&resizedImageBuf, resizedImg, nil); err != nil {
+		log.Println("Error encoding resized image:", err)
+		return "", err
 	}
 
-	for _, file := range files {
-		if !file.IsDir() {
-			filePath := filepath.Join(directory, file.Name())
-
-			// Ejecuta el script de Python con la ruta del archivo como argumento
-			cmd := exec.Command(pythonExecutable, scriptPath, filePath)
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				return fmt.Errorf("error al ejecutar el script de Python para el archivo %s: %v\nOutput: %s", file.Name(), err, output)
-			}
-		}
+	uploadStream, err := bucket.OpenUploadStream(fileHeader.Filename)
+	if err != nil {
+		log.Println("Error uploading image to GridFS:", err)
+		return "", err
 	}
-	return nil
+	defer uploadStream.Close()
+
+	_, err = io.Copy(uploadStream, &resizedImageBuf)
+	if err != nil {
+		log.Println("Error copying image to GridFS:", err)
+		return "", err
+	}
+
+	return uploadStream.FileID.(primitive.ObjectID).Hex(), nil
 }

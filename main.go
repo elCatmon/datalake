@@ -14,7 +14,7 @@ func main() {
 	db := InitializeDatabase()
 	defer db.Close()
 
-	client, _, bucket := InitializeMongoDBClient()
+	client, database, bucket := InitializeMongoDBClient()
 	defer client.Disconnect(context.Background())
 
 	// Crear un enrutador y configurar rutas
@@ -41,7 +41,10 @@ func main() {
 		ThumbnailHandler(w, r, client.Database("bdmdm"))
 	}).Methods("GET")
 
-	r.HandleFunc("/donacion", DonacionHandler).Methods("POST") // Actualización aquí: DonacionHandler no necesita el bucket
+	// Ruta para importar archivos y datos
+	r.HandleFunc("/importar", func(w http.ResponseWriter, r *http.Request) {
+		handleImportar(w, r, bucket, database)
+	}).Methods("POST")
 
 	// Configuración de CORS usando handlers.CORS
 	corsHandler := handlers.CORS(
