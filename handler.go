@@ -186,22 +186,30 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	if region != "" {
 		filter["region"] = region
 	}
-	if edadMin != "" {
-		edadMinInt, err := strconv.Atoi(edadMin)
-		if err != nil {
-			http.Error(w, "Edad mínima inválida", http.StatusBadRequest)
-			return
+	if edadMin != "" || edadMax != "" {
+		edadFilter := bson.M{}
+
+		if edadMin != "" {
+			edadMinInt, err := strconv.Atoi(edadMin)
+			if err != nil {
+				http.Error(w, "Edad mínima inválida", http.StatusBadRequest)
+				return
+			}
+			edadFilter["$gte"] = edadMinInt
 		}
-		filter["edad"] = bson.M{"$gte": edadMinInt}
-	}
-	if edadMax != "" {
-		edadMaxInt, err := strconv.Atoi(edadMax)
-		if err != nil {
-			http.Error(w, "Edad máxima inválida", http.StatusBadRequest)
-			return
+
+		if edadMax != "" {
+			edadMaxInt, err := strconv.Atoi(edadMax)
+			if err != nil {
+				http.Error(w, "Edad máxima inválida", http.StatusBadRequest)
+				return
+			}
+			edadFilter["$lte"] = edadMaxInt
 		}
-		filter["edad"] = bson.M{"$lte": edadMaxInt}
+
+		filter["edad"] = edadFilter
 	}
+
 	if sexo != "" {
 		filter["sexo"] = sexo
 	}
@@ -286,11 +294,9 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 
 	// Devolver la lista de URLs de las miniaturas
 	w.Header().Set("Content-Type", "application/json")
-	if len(images) == 0 {
-		log.Println("No se encontraron imágenes que coincidan con los filtros.")
-	}
 	json.NewEncoder(w).Encode(images)
 }
+
 func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket, database *mongo.Database) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
@@ -306,7 +312,6 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 	}
 
 	formData := r.MultipartForm
-	log.Println("Form Data:", formData)
 
 	// Verificar campos obligatorios
 	estudioID, err := getValueOrError(formData.Value, "estudio_ID")
@@ -378,7 +383,6 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 	edad, err := strconv.Atoi(edadStr)
 	if err != nil {
 		http.Error(w, "Invalid age format", http.StatusBadRequest)
-		log.Println("Invalid age format:", err)
 		return
 	}
 
@@ -386,7 +390,6 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 	fechaNacimientoParsed, err := time.Parse("2006-01-02", fechaNacimiento)
 	if err != nil {
 		http.Error(w, "Invalid date format", http.StatusBadRequest)
-		log.Println("Invalid date format:", err)
 		return
 	}
 
@@ -394,13 +397,11 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 	fechaEstudioParsed, err := time.Parse("2006-01-02", FechaEstudio)
 	if err != nil {
 		http.Error(w, "Invalid date format", http.StatusBadRequest)
-		log.Println("Invalid date format:", err)
 		return
 	}
 
 	// Generar el hash a partir del nombre del donador y el número de operación
 	hash := generateHash(donador, numeroOperacion)
-	log.Println("Generated Hash:", hash)
 
 	// Procesamiento de archivos originales
 	originalFiles := formData.File["archivosOriginales"]
@@ -408,16 +409,11 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 
 	if originalFiles == nil || anonymizedFiles == nil {
 		http.Error(w, "No images field found", http.StatusBadRequest)
-		log.Println("No 'archivosOriginales' or 'archivosAnonimizados' field found in form data")
 		return
 	}
 
-	log.Println("Original Files received:", len(originalFiles))
-	log.Println("Anonymized Files received:", len(anonymizedFiles))
-
 	if len(originalFiles) == 0 || len(anonymizedFiles) == 0 {
 		http.Error(w, "No images uploaded", http.StatusBadRequest)
-		log.Println("No images received")
 		return
 	}
 
@@ -441,8 +437,6 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 
 	// Subir archivos anonimizados
 	for _, fileHeader := range anonymizedFiles {
-		log.Printf("Processing anonymized file: %s", fileHeader.Filename)
-
 		fileID, err := uploadFileToGridFS(fileHeader, bucket)
 		if err != nil {
 			http.Error(w, "Failed to upload anonymized file", http.StatusInternalServerError)
@@ -480,7 +474,6 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 	_, err = collection.InsertOne(r.Context(), estudioDoc)
 	if err != nil {
 		http.Error(w, "Failed to insert document", http.StatusInternalServerError)
-		log.Println("Error inserting document into MongoDB:", err)
 		return
 	}
 
@@ -510,14 +503,12 @@ func generateHash(donador, numOperacion string) string {
 func uploadFileToGridFS(fileHeader *multipart.FileHeader, bucket *gridfs.Bucket) (string, error) {
 	file, err := fileHeader.Open()
 	if err != nil {
-		log.Println("Error opening file:", err)
 		return "", err
 	}
 	defer file.Close()
 
 	img, _, err := image.Decode(file)
 	if err != nil {
-		log.Println("Error decoding image:", err)
 		return "", err
 	}
 
@@ -525,20 +516,17 @@ func uploadFileToGridFS(fileHeader *multipart.FileHeader, bucket *gridfs.Bucket)
 
 	var resizedImageBuf bytes.Buffer
 	if err := jpeg.Encode(&resizedImageBuf, resizedImg, nil); err != nil {
-		log.Println("Error encoding resized image:", err)
 		return "", err
 	}
 
 	uploadStream, err := bucket.OpenUploadStream(fileHeader.Filename)
 	if err != nil {
-		log.Println("Error uploading image to GridFS:", err)
 		return "", err
 	}
 	defer uploadStream.Close()
 
 	_, err = io.Copy(uploadStream, &resizedImageBuf)
 	if err != nil {
-		log.Println("Error copying image to GridFS:", err)
 		return "", err
 	}
 

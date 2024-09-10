@@ -3,6 +3,7 @@ module webservice
 go 1.23.0
 
 require (
+	github.com/disintegration/imaging v1.6.2
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
 	github.com/lib/pq v1.10.9
@@ -11,7 +12,6 @@ require (
 )
 
 require (
-	github.com/disintegration/imaging v1.6.2 // indirect
 	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/klauspost/compress v1.13.6 // indirect
