@@ -68,8 +68,9 @@ type FileDocument struct {
 }
 
 type Imagen struct {
-	Dicom  string `bson:"dicom"`
-	Imagen string `bson:"imagen"`
+	Dicom       string `bson:"dicom"`
+	Imagen      string `bson:"imagen"`
+	Anonimizada bool   `bson:"anonimizada"`
 }
 
 type Diagnostico struct {
@@ -80,11 +81,14 @@ type Diagnostico struct {
 type EstudioDocument struct {
 	ID              primitive.ObjectID `bson:"_id,omitempty"`
 	EstudioID       string             `bson:"estudio_ID"`
+	Region          string             `bson:"region"`
 	Hash            string             `bson:"hash"`
+	Status          string             `bson:"status"`
 	Estudio         string             `bson:"estudio"`
 	Sexo            string             `bson:"sexo"`
 	Edad            int                `bson:"edad"`
 	FechaNacimiento time.Time          `bson:"fecha_nacimiento"`
+	FechaEstudio    time.Time          `bson:"fecha_estudio"`
 	Imagenes        []Imagen           `bson:"imagenes"`
 	Diagnostico     []Diagnostico      `bson:"diagnostico"`
 }
