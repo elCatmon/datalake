@@ -3,15 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"image"
 	"image/jpeg"
 	"io"
+	"log"
+	"mime/multipart"
 	"net/http"
-	"os"
-	"os/exec"
 	"strconv"
 	"time"
 
@@ -154,18 +156,73 @@ func ImageHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket)
 	w.Write(data)
 }
 
-// ThumbnailHandler maneja la solicitud para obtener las miniaturas de imágenes JPG.
 func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+	// Obtener la colección de estudios
+	studiesCollection := db.Collection("estudios")
+
+	// Filtrar estudios que contienen imágenes anonimizadas y con estado "Aceptado"
+	filter := bson.M{
+		"imagenes": bson.M{
+			"$elemMatch": bson.M{
+				"anonimizada": true,
+			},
+		},
+		"status": "Aceptado",
+	}
+
+	// Buscar los estudios que cumplen con el filtro
+	cursor, err := studiesCollection.Find(context.Background(), filter)
+	if err != nil {
+		http.Error(w, "Error al buscar estudios en la base de datos: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	// Recolectar IDs de imágenes que cumplen con los criterios
+	var imageIDs []primitive.ObjectID
+	for cursor.Next(context.Background()) {
+		var study EstudioDocument
+		if err := cursor.Decode(&study); err != nil {
+			http.Error(w, "Error al decodificar estudio: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		for _, img := range study.Imagenes {
+			if img.Anonimizada {
+				imageID, err := primitive.ObjectIDFromHex(img.Imagen)
+				if err != nil {
+					http.Error(w, "Error al convertir ID de imagen: "+err.Error(), http.StatusInternalServerError)
+					return
+				}
+				imageIDs = append(imageIDs, imageID)
+			}
+		}
+	}
+
+	if err := cursor.Err(); err != nil {
+		http.Error(w, "Error al iterar sobre los estudios: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if len(imageIDs) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]string{})
+		return
+	}
+
 	// Obtener la colección de archivos GridFS
 	imagesCollection := db.Collection("imagenes.files")
 
-	// Filtrar solo archivos que terminan en .jpg
-	filter := bson.M{"filename": bson.M{"$regex": `\.jpg$`}}
+	// Filtrar archivos con IDs en imageIDs y que terminen en .jpg
+	filter = bson.M{
+		"_id":      bson.M{"$in": imageIDs},
+		"filename": bson.M{"$regex": `\.jpg$`},
+	}
 
 	// Buscar los archivos en la colección usando el filtro
-	cursor, err := imagesCollection.Find(context.Background(), filter)
+	cursor, err = imagesCollection.Find(context.Background(), filter)
 	if err != nil {
-		http.Error(w, "Error al buscar archivos en la base de datos", http.StatusInternalServerError)
+		http.Error(w, "Error al buscar archivos en la base de datos: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer cursor.Close(context.Background())
@@ -174,7 +231,7 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	for cursor.Next(context.Background()) {
 		var fileInfo bson.M
 		if err := cursor.Decode(&fileInfo); err != nil {
-			http.Error(w, "Error al decodificar archivo", http.StatusInternalServerError)
+			http.Error(w, "Error al decodificar archivo: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -182,13 +239,12 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 		filename, ok := fileInfo["filename"].(string)
 		if ok {
 			imageURL := ip + "/image/" + filename
-
 			images = append(images, imageURL)
 		}
 	}
 
 	if err := cursor.Err(); err != nil {
-		http.Error(w, "Error al iterar sobre los archivos", http.StatusInternalServerError)
+		http.Error(w, "Error al iterar sobre los archivos: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -203,211 +259,250 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 		return
 	}
 
-	// Parsear el formulario multipart para manejar archivos grandes (hasta 10MB)
-	err := r.ParseMultipartForm(10 << 20)
+	// Limitar el tamaño del archivo a 50 MB
+	err := r.ParseMultipartForm(50 << 20)
 	if err != nil {
 		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
-		fmt.Println("Error parsing form data:", err)
+		log.Println("Error parsing form data:", err)
 		return
 	}
 
 	formData := r.MultipartForm
-	fmt.Println("Form Data:", formData) // Verifica lo que se recibe en el formulario
+	log.Println("Form Data:", formData)
 
-	// Verificar si los valores claves están presentes
-	if len(formData.Value["estudio_ID"]) == 0 || len(formData.Value["sexo"]) == 0 {
-		http.Error(w, "Missing required fields", http.StatusBadRequest)
-		fmt.Println("Missing estudio_ID or sexo")
+	// Verificar campos obligatorios
+	estudioID, err := getValueOrError(formData.Value, "estudio_ID")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	estudioID := formData.Value["estudio_ID"][0]
-	estudio := formData.Value["estudio"][0]
-	sexo := formData.Value["sexo"][0]
-	edadStr := formData.Value["edad"][0]
-	fechaNacimiento := formData.Value["fecha_nacimiento"][0]
-	proyeccion := formData.Value["proyeccion"][0]
-	hallazgos := formData.Value["hallazgos"][0]
+	estudio, err := getValueOrError(formData.Value, "estudio")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-	fmt.Println("Estudio ID:", estudioID)
-	fmt.Println("Sexo:", sexo)
-	fmt.Println("Edad:", edadStr)
-	fmt.Println("Fecha Nacimiento:", fechaNacimiento)
-	fmt.Println("Proyeccion:", proyeccion)
-	fmt.Println("Hallazgos:", hallazgos)
+	region, err := getValueOrError(formData.Value, "region")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-	// Convertir edad de string a int
+	sexo, err := getValueOrError(formData.Value, "sexo")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	edadStr, err := getValueOrError(formData.Value, "edad")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	fechaNacimiento, err := getValueOrError(formData.Value, "fecha_nacimiento")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	FechaEstudio, err := getValueOrError(formData.Value, "fecha_estudio")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	proyeccion, err := getValueOrError(formData.Value, "proyeccion")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	hallazgos := formData.Value["hallazgos"]
+	if len(hallazgos) == 0 {
+		hallazgos = []string{"N/A"} // Valor por defecto si hallazgos no está presente
+	}
+
+	donador, err := getValueOrError(formData.Value, "donador")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	numeroOperacion, err := getValueOrError(formData.Value, "estudio_ID")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Conversión de edad
 	edad, err := strconv.Atoi(edadStr)
 	if err != nil {
 		http.Error(w, "Invalid age format", http.StatusBadRequest)
-		fmt.Println("Invalid age format:", err)
+		log.Println("Invalid age format:", err)
 		return
 	}
 
-	// Convertir fecha de nacimiento de string a time.Time
+	// Conversión de fecha
 	fechaNacimientoParsed, err := time.Parse("2006-01-02", fechaNacimiento)
 	if err != nil {
 		http.Error(w, "Invalid date format", http.StatusBadRequest)
-		fmt.Println("Invalid date format:", err)
+		log.Println("Invalid date format:", err)
 		return
 	}
 
-	// Manejo de los archivos de imágenes
-	files := formData.File["imagenes"] // Cambiar a "imagenes" para coincidir con el frontend
-	if len(files) == 0 {
+	// Conversión de fecha
+	fechaEstudioParsed, err := time.Parse("2006-01-02", FechaEstudio)
+	if err != nil {
+		http.Error(w, "Invalid date format", http.StatusBadRequest)
+		log.Println("Invalid date format:", err)
+		return
+	}
+
+	// Generar el hash a partir del nombre del donador y el número de operación
+	hash := generateHash(donador, numeroOperacion)
+	log.Println("Generated Hash:", hash)
+
+	// Procesamiento de archivos originales
+	originalFiles := formData.File["archivosOriginales"]
+	anonymizedFiles := formData.File["archivosAnonimizados"]
+
+	if originalFiles == nil || anonymizedFiles == nil {
+		http.Error(w, "No images field found", http.StatusBadRequest)
+		log.Println("No 'archivosOriginales' or 'archivosAnonimizados' field found in form data")
+		return
+	}
+
+	log.Println("Original Files received:", len(originalFiles))
+	log.Println("Anonymized Files received:", len(anonymizedFiles))
+
+	if len(originalFiles) == 0 || len(anonymizedFiles) == 0 {
 		http.Error(w, "No images uploaded", http.StatusBadRequest)
-		fmt.Println("No images received")
+		log.Println("No images received")
 		return
 	}
-
-	fmt.Println("Number of images received:", len(files))
 
 	var imagenes []Imagen
-	for _, fileHeader := range files {
-		file, err := fileHeader.Open()
+
+	// Subir archivos originales
+	for _, fileHeader := range originalFiles {
+		log.Printf("Processing original file: %s", fileHeader.Filename)
+
+		fileID, err := uploadFileToGridFS(fileHeader, bucket)
 		if err != nil {
-			http.Error(w, "Failed to open file", http.StatusInternalServerError)
-			fmt.Println("Error opening file:", err)
+			http.Error(w, "Failed to upload original file", http.StatusInternalServerError)
 			return
 		}
-		defer file.Close()
-
-		// Convertir la imagen JPG original a DICOM
-		dicomData, err := convertJPGtoDICOM(file)
-		if err != nil {
-			http.Error(w, "Failed to convert JPG to DICOM", http.StatusInternalServerError)
-			fmt.Println("Error converting JPG to DICOM:", err)
-			return
-		}
-
-		// Subir el DICOM a GridFS
-		dicomUploadStream, err := bucket.OpenUploadStream(fileHeader.Filename + ".dcm")
-		if err != nil {
-			http.Error(w, "Failed to upload DICOM to GridFS", http.StatusInternalServerError)
-			fmt.Println("Error uploading DICOM to GridFS:", err)
-			return
-		}
-		defer dicomUploadStream.Close()
-
-		_, err = io.Copy(dicomUploadStream, dicomData)
-		if err != nil {
-			http.Error(w, "Failed to write DICOM to GridFS", http.StatusInternalServerError)
-			fmt.Println("Error copying DICOM to GridFS:", err)
-			return
-		}
-
-		// Redimensionar la imagen JPG original a 128x128 píxeles
-		img, _, err := image.Decode(file)
-		if err != nil {
-			http.Error(w, "Failed to decode image", http.StatusInternalServerError)
-			fmt.Println("Error decoding image:", err)
-			return
-		}
-
-		resizedImg := imaging.Resize(img, 128, 128, imaging.Lanczos)
-
-		var resizedImageBuf bytes.Buffer
-		if err := jpeg.Encode(&resizedImageBuf, resizedImg, nil); err != nil {
-			http.Error(w, "Failed to encode resized image", http.StatusInternalServerError)
-			fmt.Println("Error encoding resized image:", err)
-			return
-		}
-
-		// Subir la imagen redimensionada a GridFS
-		uploadStream, err := bucket.OpenUploadStream(fileHeader.Filename)
-		if err != nil {
-			http.Error(w, "Failed to upload resized image to GridFS", http.StatusInternalServerError)
-			fmt.Println("Error uploading resized image to GridFS:", err)
-			return
-		}
-		defer uploadStream.Close()
-
-		_, err = io.Copy(uploadStream, &resizedImageBuf)
-		if err != nil {
-			http.Error(w, "Failed to write resized image to GridFS", http.StatusInternalServerError)
-			fmt.Println("Error copying resized image to GridFS:", err)
-			return
-		}
-
-		// Convertir el ID a `primitive.ObjectID` y obtener su representación en hexadecimal
-		fileID := uploadStream.FileID.(primitive.ObjectID)
-		dicomFileID := dicomUploadStream.FileID.(primitive.ObjectID)
-
-		// Agregar la referencia al archivo subido (ID de GridFS)
-		fmt.Println("Image uploaded successfully:", fileHeader.Filename, "with ID:", fileID.Hex())
-		fmt.Println("DICOM uploaded successfully:", fileHeader.Filename+".dcm", "with ID:", dicomFileID.Hex())
 
 		imagenes = append(imagenes, Imagen{
-			Dicom:  dicomFileID.Hex(), // Guardar el ID de GridFS del DICOM en el campo Dicom
-			Imagen: fileID.Hex(),      // Guardar el ID de GridFS de la imagen redimensionada en el campo Imagen
+			Imagen:      fileID,
+			Anonimizada: false, // Archivo original
 		})
 	}
 
-	// Crear el documento de estudio
+	// Subir archivos anonimizados
+	for _, fileHeader := range anonymizedFiles {
+		log.Printf("Processing anonymized file: %s", fileHeader.Filename)
+
+		fileID, err := uploadFileToGridFS(fileHeader, bucket)
+		if err != nil {
+			http.Error(w, "Failed to upload anonymized file", http.StatusInternalServerError)
+			return
+		}
+
+		imagenes = append(imagenes, Imagen{
+			Imagen:      fileID,
+			Anonimizada: true, // Archivo anonimizado
+		})
+	}
+
+	// Crear el documento del estudio
 	estudioDoc := EstudioDocument{
 		EstudioID:       estudioID,
-		Hash:            "",
+		Region:          region,
+		Hash:            hash, // Asignar el hash generado
+		Status:          "No Aceptado",
 		Estudio:         estudio,
 		Sexo:            sexo,
-		Edad:            edad, // Aquí ya es de tipo int
+		Edad:            edad,
 		FechaNacimiento: fechaNacimientoParsed,
+		FechaEstudio:    fechaEstudioParsed,
 		Imagenes:        imagenes,
 		Diagnostico: []Diagnostico{
 			{
 				Proyeccion: proyeccion,
-				Hallazgos:  hallazgos,
+				Hallazgos:  hallazgos[0],
 			},
 		},
 	}
 
-	// Insertar el documento en la colección "estudios"
+	// Insertar el documento en MongoDB
 	collection := database.Collection("estudios")
-	_, err = collection.InsertOne(context.Background(), estudioDoc)
+	_, err = collection.InsertOne(r.Context(), estudioDoc)
 	if err != nil {
 		http.Error(w, "Failed to insert document", http.StatusInternalServerError)
-		fmt.Println("Error inserting document into MongoDB:", err)
+		log.Println("Error inserting document into MongoDB:", err)
 		return
 	}
 
-	// Responder con JSON de éxito
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]string{"message": "Data successfully inserted"}
 	json.NewEncoder(w).Encode(response)
 }
 
-// convertJPGtoDICOM convierte una imagen JPG a DICOM ejecutando un script Python.
-func convertJPGtoDICOM(imgData io.Reader) (io.Reader, error) {
-	// Crear un archivo temporal para almacenar la imagen JPG
-	imgFile, err := os.CreateTemp("", "*.jpg")
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temp JPG file: %w", err)
+// Función para obtener valores del formulario o devolver un error si el campo no existe
+func getValueOrError(formData map[string][]string, key string) (string, error) {
+	values, ok := formData[key]
+	if !ok || len(values) == 0 {
+		return "", errors.New("Missing or empty field: " + key)
 	}
-	defer os.Remove(imgFile.Name())
+	return values[0], nil
+}
 
-	// Copiar los datos de la imagen al archivo temporal
-	_, err = io.Copy(imgFile, imgData)
+// Función para generar un hash SHA-256
+func generateHash(donador, numOperacion string) string {
+	hashInput := donador + numOperacion
+	hash := sha256.New()
+	hash.Write([]byte(hashInput))
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+// Función para subir archivos a GridFS
+func uploadFileToGridFS(fileHeader *multipart.FileHeader, bucket *gridfs.Bucket) (string, error) {
+	file, err := fileHeader.Open()
 	if err != nil {
-		return nil, fmt.Errorf("failed to write JPG to temp file: %w", err)
+		log.Println("Error opening file:", err)
+		return "", err
 	}
-	imgFile.Close()
+	defer file.Close()
 
-	// Ejecutar el script Python para convertir JPG a DICOM
-	dicomFile := imgFile.Name() + ".dcm"
-	cmd := exec.Command("python", "convert_jpg_to_dicom.py", imgFile.Name(), dicomFile)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	err = cmd.Run()
+	img, _, err := image.Decode(file)
 	if err != nil {
-		return nil, fmt.Errorf("conversion failed: %s", stderr.String())
-	}
-
-	// Leer el archivo DICOM generado
-	dicomData, err := os.Open(dicomFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open DICOM file: %w", err)
+		log.Println("Error decoding image:", err)
+		return "", err
 	}
 
-	return dicomData, nil
+	resizedImg := imaging.Resize(img, 4096, 4096, imaging.Lanczos)
+
+	var resizedImageBuf bytes.Buffer
+	if err := jpeg.Encode(&resizedImageBuf, resizedImg, nil); err != nil {
+		log.Println("Error encoding resized image:", err)
+		return "", err
+	}
+
+	uploadStream, err := bucket.OpenUploadStream(fileHeader.Filename)
+	if err != nil {
+		log.Println("Error uploading image to GridFS:", err)
+		return "", err
+	}
+	defer uploadStream.Close()
+
+	_, err = io.Copy(uploadStream, &resizedImageBuf)
+	if err != nil {
+		log.Println("Error copying image to GridFS:", err)
+		return "", err
+	}
+
+	return uploadStream.FileID.(primitive.ObjectID).Hex(), nil
 }
