@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -19,7 +18,6 @@ import (
 
 	"github.com/disintegration/imaging"
 	"github.com/gorilla/mux"
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/gridfs"
@@ -36,7 +34,7 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 
 	// Verificar si el correo ya existe
-	exists, err := EmailExists(db, newUser.Correo)
+	exists, err := ExisteCorreo(db, newUser.Correo)
 	if err != nil {
 		http.Error(w, "Error al verificar el correo", http.StatusInternalServerError)
 		return
@@ -61,7 +59,7 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	newUser.Contrasena = string(hashedPassword)
 
 	// Registrar el usuario en la base de datos.
-	err = RegisterUser(db, newUser)
+	err = RegistrarUsuario(db, newUser)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -82,7 +80,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
-	isValid, id, authErr := AuthenticateUser(db, credentials.Correo, credentials.Contrasena)
+	isValid, id, authErr := ValidarUsuario(db, credentials.Correo, credentials.Contrasena)
 	if authErr != nil {
 		http.Error(w, `{"error": "Error interno del servidor"}`, http.StatusInternalServerError)
 		return
@@ -133,7 +131,7 @@ func ImageHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket)
 	filename := mux.Vars(r)["filename"]
 
 	// Buscar el archivo en GridFS
-	downloadStream, err := FindImage(bucket, filename)
+	downloadStream, err := EncontrarImagen(bucket, filename)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			http.Error(w, "Archivo no encontrado", http.StatusNotFound)
@@ -169,79 +167,15 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	edadMax := queryParams.Get("edadMax")
 	sexo := queryParams.Get("sexo")
 
-	// Crear el filtro de búsqueda para estudios
-	filter := bson.M{
-		"imagenes": bson.M{
-			"$elemMatch": bson.M{
-				"anonimizada": true,
-			},
-		},
-		"status": "Aceptado",
-	}
+	//Crear filtro para los estudios
+	filter, err := CrearFiltro(w, tipoEstudio, region, edadMin, edadMax, sexo)
 
-	// Agregar filtros opcionales a la consulta de estudios
-	if tipoEstudio != "" {
-		filter["estudio"] = tipoEstudio
-	}
-	if region != "" {
-		filter["region"] = region
-	}
-	if edadMin != "" || edadMax != "" {
-		edadFilter := bson.M{}
-
-		if edadMin != "" {
-			edadMinInt, err := strconv.Atoi(edadMin)
-			if err != nil {
-				http.Error(w, "Edad mínima inválida", http.StatusBadRequest)
-				return
-			}
-			edadFilter["$gte"] = edadMinInt
-		}
-
-		if edadMax != "" {
-			edadMaxInt, err := strconv.Atoi(edadMax)
-			if err != nil {
-				http.Error(w, "Edad máxima inválida", http.StatusBadRequest)
-				return
-			}
-			edadFilter["$lte"] = edadMaxInt
-		}
-
-		filter["edad"] = edadFilter
-	}
-
-	if sexo != "" {
-		filter["sexo"] = sexo
-	}
-
-	// Buscar los estudios que cumplen con el filtro
-	cursor, err := studiesCollection.Find(context.Background(), filter)
 	if err != nil {
-		http.Error(w, "Error al buscar estudios en la base de datos: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error al leer el archivo", http.StatusInternalServerError)
 		return
 	}
-	defer cursor.Close(context.Background())
 
-	// Recolectar IDs de imágenes que cumplen con los criterios
-	var imageIDs []primitive.ObjectID
-	for cursor.Next(context.Background()) {
-		var study EstudioDocument
-		if err := cursor.Decode(&study); err != nil {
-			http.Error(w, "Error al decodificar estudio: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		for _, img := range study.Imagenes {
-			if img.Anonimizada {
-				imageID, err := primitive.ObjectIDFromHex(img.Imagen)
-				if err != nil {
-					http.Error(w, "Error al convertir ID de imagen: "+err.Error(), http.StatusInternalServerError)
-					return
-				}
-				imageIDs = append(imageIDs, imageID)
-			}
-		}
-	}
+	imageIDs, cursor, err := buscarEstudios(w, studiesCollection, filter)
 
 	if err := cursor.Err(); err != nil {
 		http.Error(w, "Error al iterar sobre los estudios: "+err.Error(), http.StatusInternalServerError)
@@ -254,43 +188,12 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 		return
 	}
 
-	// Obtener la colección de archivos GridFS
-	imagesCollection := db.Collection("imagenes.files")
-
-	// Filtrar archivos con IDs en imageIDs y que terminen en .jpg
-	filter = bson.M{
-		"_id":      bson.M{"$in": imageIDs},
-		"filename": bson.M{"$regex": `\.jpg$`},
-	}
-
-	// Buscar los archivos en la colección usando el filtro
-	cursor, err = imagesCollection.Find(context.Background(), filter)
-	if err != nil {
-		http.Error(w, "Error al buscar archivos en la base de datos: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer cursor.Close(context.Background())
-
-	var images []string
-	for cursor.Next(context.Background()) {
-		var fileInfo FileDocument
-		if err := cursor.Decode(&fileInfo); err != nil {
-			http.Error(w, "Error al decodificar archivo: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Obtener el nombre del archivo y construir la URL
-		filename := fileInfo.Filename
-		if filename != "" {
-			imageURL := ip + "/image/" + filename
-			images = append(images, imageURL)
-		}
-	}
-
 	if err := cursor.Err(); err != nil {
 		http.Error(w, "Error al iterar sobre los archivos: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	images, err := BuscarImagenes(w, filter, cursor, imageIDs, db)
 
 	// Devolver la lista de URLs de las miniaturas
 	w.Header().Set("Content-Type", "application/json")
@@ -303,8 +206,8 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 		return
 	}
 
-	// Limitar el tamaño del archivo a 50 MB
-	err := r.ParseMultipartForm(50 << 20)
+	// Limitar el tamaño del archivo a 20 MB
+	err := r.ParseMultipartForm(20 << 20)
 	if err != nil {
 		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 		log.Println("Error parsing form data:", err)
