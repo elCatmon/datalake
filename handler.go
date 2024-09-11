@@ -2,19 +2,14 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"image"
 	"image/jpeg"
 	"io"
-	"log"
 	"mime/multipart"
 	"net/http"
-	"strconv"
-	"time"
 
 	"github.com/disintegration/imaging"
 	"github.com/gorilla/mux"
@@ -171,11 +166,15 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	filter, err := CrearFiltro(w, tipoEstudio, region, edadMin, edadMax, sexo)
 
 	if err != nil {
-		http.Error(w, "Error al leer el archivo", http.StatusInternalServerError)
+		http.Error(w, "Error al crear el filtro", http.StatusInternalServerError)
 		return
 	}
 
-	imageIDs, cursor, err := buscarEstudios(w, studiesCollection, filter)
+	imageIDs, cursor, error := buscarEstudios(w, studiesCollection, filter)
+	if error != nil {
+		http.Error(w, "Error al buscar los estudios", http.StatusInternalServerError)
+		return
+	}
 
 	if err := cursor.Err(); err != nil {
 		http.Error(w, "Error al iterar sobre los estudios: "+err.Error(), http.StatusInternalServerError)
@@ -193,7 +192,10 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 		return
 	}
 
-	images, err := BuscarImagenes(w, filter, cursor, imageIDs, db)
+	images, error := BuscarImagenes(w, imageIDs, db)
+	if error != nil {
+
+	}
 
 	// Devolver la lista de URLs de las miniaturas
 	w.Header().Set("Content-Type", "application/json")
@@ -205,180 +207,19 @@ func handleImportar(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
-
 	// Limitar el tamaño del archivo a 20 MB
 	err := r.ParseMultipartForm(20 << 20)
 	if err != nil {
 		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
-		log.Println("Error parsing form data:", err)
 		return
 	}
-
-	formData := r.MultipartForm
-
-	// Verificar campos obligatorios
-	estudioID, err := getValueOrError(formData.Value, "estudio_ID")
+	//Procesar datos del formulario para subirlos a mongo
+	datos, err := ProcesarDonacionFisica(w, r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 	}
-
-	estudio, err := getValueOrError(formData.Value, "estudio")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	region, err := getValueOrError(formData.Value, "region")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	sexo, err := getValueOrError(formData.Value, "sexo")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	edadStr, err := getValueOrError(formData.Value, "edad")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	fechaNacimiento, err := getValueOrError(formData.Value, "fecha_nacimiento")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	FechaEstudio, err := getValueOrError(formData.Value, "fecha_estudio")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	proyeccion, err := getValueOrError(formData.Value, "proyeccion")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	hallazgos := formData.Value["hallazgos"]
-	if len(hallazgos) == 0 {
-		hallazgos = []string{"N/A"} // Valor por defecto si hallazgos no está presente
-	}
-
-	donador, err := getValueOrError(formData.Value, "donador")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	numeroOperacion, err := getValueOrError(formData.Value, "estudio_ID")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Conversión de edad
-	edad, err := strconv.Atoi(edadStr)
-	if err != nil {
-		http.Error(w, "Invalid age format", http.StatusBadRequest)
-		return
-	}
-
-	// Conversión de fecha
-	fechaNacimientoParsed, err := time.Parse("2006-01-02", fechaNacimiento)
-	if err != nil {
-		http.Error(w, "Invalid date format", http.StatusBadRequest)
-		return
-	}
-
-	// Conversión de fecha
-	fechaEstudioParsed, err := time.Parse("2006-01-02", FechaEstudio)
-	if err != nil {
-		http.Error(w, "Invalid date format", http.StatusBadRequest)
-		return
-	}
-
-	// Generar el hash a partir del nombre del donador y el número de operación
-	hash := generateHash(donador, numeroOperacion)
-
-	// Procesamiento de archivos originales
-	originalFiles := formData.File["archivosOriginales"]
-	anonymizedFiles := formData.File["archivosAnonimizados"]
-
-	if originalFiles == nil || anonymizedFiles == nil {
-		http.Error(w, "No images field found", http.StatusBadRequest)
-		return
-	}
-
-	if len(originalFiles) == 0 || len(anonymizedFiles) == 0 {
-		http.Error(w, "No images uploaded", http.StatusBadRequest)
-		return
-	}
-
-	var imagenes []Imagen
-
-	// Subir archivos originales
-	for _, fileHeader := range originalFiles {
-		log.Printf("Processing original file: %s", fileHeader.Filename)
-
-		fileID, err := uploadFileToGridFS(fileHeader, bucket)
-		if err != nil {
-			http.Error(w, "Failed to upload original file", http.StatusInternalServerError)
-			return
-		}
-
-		imagenes = append(imagenes, Imagen{
-			Imagen:      fileID,
-			Anonimizada: false, // Archivo original
-		})
-	}
-
-	// Subir archivos anonimizados
-	for _, fileHeader := range anonymizedFiles {
-		fileID, err := uploadFileToGridFS(fileHeader, bucket)
-		if err != nil {
-			http.Error(w, "Failed to upload anonymized file", http.StatusInternalServerError)
-			return
-		}
-
-		imagenes = append(imagenes, Imagen{
-			Imagen:      fileID,
-			Anonimizada: true, // Archivo anonimizado
-		})
-	}
-
-	// Crear el documento del estudio
-	estudioDoc := EstudioDocument{
-		EstudioID:       estudioID,
-		Region:          region,
-		Hash:            hash, // Asignar el hash generado
-		Status:          "No Aceptado",
-		Estudio:         estudio,
-		Sexo:            sexo,
-		Edad:            edad,
-		FechaNacimiento: fechaNacimientoParsed,
-		FechaEstudio:    fechaEstudioParsed,
-		Imagenes:        imagenes,
-		Diagnostico: []Diagnostico{
-			{
-				Proyeccion: proyeccion,
-				Hallazgos:  hallazgos[0],
-			},
-		},
-	}
-
-	// Insertar el documento en MongoDB
-	collection := database.Collection("estudios")
-	_, err = collection.InsertOne(r.Context(), estudioDoc)
-	if err != nil {
-		http.Error(w, "Failed to insert document", http.StatusInternalServerError)
-		return
-	}
+	//Subir informacion e imagenes a mongo
+	SubirDonacionFisica(datos, w, bucket, r, database)
 
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]string{"message": "Data successfully inserted"}
@@ -392,14 +233,6 @@ func getValueOrError(formData map[string][]string, key string) (string, error) {
 		return "", errors.New("Missing or empty field: " + key)
 	}
 	return values[0], nil
-}
-
-// Función para generar un hash SHA-256
-func generateHash(donador, numOperacion string) string {
-	hashInput := donador + numOperacion
-	hash := sha256.New()
-	hash.Write([]byte(hashInput))
-	return hex.EncodeToString(hash.Sum(nil))
 }
 
 // Función para subir archivos a GridFS
