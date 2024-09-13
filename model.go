@@ -62,9 +62,11 @@ type Consultas struct {
 
 // FileDocument representa un documento en la colección `imagenes.files`.
 type FileDocument struct {
-	ID          primitive.ObjectID `bson:"_id"`
-	Filename    string             `bson:"filename"`
-	EstudioType string             `bson:"estudio"`
+	ID         primitive.ObjectID `bson:"_id"`
+	Filename   string             `bson:"filename"`
+	Length     int64              `bson:"length"`
+	ChunkSize  int                `bson:"chunkSize"`
+	UploadDate time.Time          `bson:"uploadDate"`
 }
 
 type Imagen struct {

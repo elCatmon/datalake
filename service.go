@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"mime/multipart"
 	"net/http"
 	"strconv"
@@ -280,12 +281,12 @@ func ProcesarDonacionFisica(w http.ResponseWriter, r *http.Request) ([]interface
 	originalFiles := formData.File["archivosOriginales"]
 	anonymizedFiles := formData.File["archivosAnonimizados"]
 
-	if originalFiles == nil || len(originalFiles) == 0 {
+	if len(originalFiles) == 0 {
 		http.Error(w, "No original files uploaded", http.StatusBadRequest)
 		return nil, errors.New("no original files uploaded")
 	}
 
-	if anonymizedFiles == nil || len(anonymizedFiles) == 0 {
+	if len(anonymizedFiles) == 0 {
 		http.Error(w, "No anonymized files uploaded", http.StatusBadRequest)
 		return nil, errors.New("no anonymized files uploaded")
 	}
@@ -385,4 +386,24 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 	if err != nil {
 		http.Error(w, "Failed to insert document", http.StatusInternalServerError)
 	}
+}
+
+// Función para parsear fechas y usar la fecha actual si la fecha es inválida o vacía
+func parseDate(dateStr string) (time.Time, error) {
+	if dateStr == "" {
+		return time.Now(), nil
+	}
+
+	fecha, err := time.Parse("2006-01-02", dateStr)
+	if err != nil {
+		return time.Now(), nil
+	}
+	return fecha, nil
+}
+
+// Función para generar un ID de estudio de 12 dígitos
+func generateStudyID() string {
+	rand.Seed(time.Now().UnixNano())
+	id := rand.Intn(1000000000000)  // Genera un número aleatorio de hasta 12 dígitos
+	return fmt.Sprintf("%012d", id) // Formatea el número a 12 dígitos
 }

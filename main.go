@@ -29,8 +29,8 @@ func main() {
 		LoginHandler(w, r, db)
 	}).Methods("POST")
 
-	r.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
-		UploadHandler(w, r, bucket)
+	r.HandleFunc("/donacion", func(w http.ResponseWriter, r *http.Request) {
+		UploadHandler(w, r, bucket, database)
 	}).Methods("POST")
 
 	r.HandleFunc("/image/{filename:[a-zA-Z0-9_\\-\\.]+}", func(w http.ResponseWriter, r *http.Request) {

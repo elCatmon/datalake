@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"io"
@@ -12,12 +14,15 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/disintegration/imaging"
 	"github.com/gorilla/mux"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/gridfs"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -107,19 +112,55 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	log.Printf("Inicio de sesión exitoso para el correo %s, ID de usuario: %s", credentials.Correo, id)
 }
 
-// UploadHandler maneja la solicitud para cargar una imagen a GridFS.
-func UploadHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket) {
+func UploadHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket, db *mongo.Database) {
 	// Leer el archivo cargado
-	file, _, err := r.FormFile("file")
+	file, fileHeader, err := r.FormFile("files")
 	if err != nil {
+		log.Printf("Error al leer el archivo: %v", err)
 		http.Error(w, "Error al leer el archivo", http.StatusBadRequest)
 		return
 	}
 	defer file.Close()
+	log.Printf("Archivo recibido: %s", fileHeader.Filename)
+
+	// Leer tipo de estudio
+	estudioType := r.FormValue("tipoEstudio")
+	if estudioType == "" {
+		log.Println("Tipo de estudio no proporcionado")
+		http.Error(w, "Tipo de estudio es requerido", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Tipo de estudio: %s", estudioType)
+
+	// Leer y convertir la edad
+	edadStr := r.FormValue("edad")
+	var edad int
+	if edadStr == "" {
+		edad = 0
+	} else {
+		edad, err = strconv.Atoi(edadStr)
+		if err != nil {
+			log.Println("Edad no válida")
+			http.Error(w, "Edad debe ser un número entero", http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Leer y convertir la fecha de nacimiento
+	fechaNacimientoStr := r.FormValue("fechaNacimiento")
+	fechaNacimiento, _ := parseDate(fechaNacimientoStr)
+
+	// Leer y convertir la fecha de estudio
+	fechaEstudioStr := r.FormValue("fechaEstudio")
+	fechaEstudio, _ := parseDate(fechaEstudioStr)
 
 	// Crear un nuevo upload stream en GridFS
-	uploadStream, err := bucket.OpenUploadStream(r.FormValue("filename"))
+	filename := fmt.Sprintf("%s_%d", time.Now().Format("20060102150405"), time.Now().UnixNano())
+	log.Printf("Nombre del archivo para GridFS: %s", filename)
+
+	uploadStream, err := bucket.OpenUploadStream(filename, options.GridFSUpload().SetMetadata(bson.M{"filename": fileHeader.Filename}))
 	if err != nil {
+		log.Printf("Error al crear el upload stream: %v", err)
 		http.Error(w, "Error al crear el upload stream", http.StatusInternalServerError)
 		return
 	}
@@ -128,9 +169,54 @@ func UploadHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket
 	// Copiar el archivo al upload stream
 	_, err = io.Copy(uploadStream, file)
 	if err != nil {
-		http.Error(w, "Error al copiar el archivo", http.StatusInternalServerError)
+		log.Printf("Error al copiar el archivo al upload stream: %v", err)
+		http.Error(w, "Error al copiar el archivo al upload stream", http.StatusInternalServerError)
 		return
 	}
+	log.Printf("Archivo copiado al upload stream exitosamente")
+
+	// Obtener el FileID del archivo subido
+	fileID := uploadStream.FileID.(primitive.ObjectID)
+	fileIDStr := fileID.Hex()
+
+	// Generar un ID de estudio de 12 dígitos
+	studyID := generateStudyID()
+
+	// Crear el documento del estudio
+	estudioDoc := EstudioDocument{
+		EstudioID:       studyID, // Guardar el ID de estudio generado
+		Region:          estudioType,
+		Hash:            "", // Asignar el hash si es necesario
+		Status:          "No Aceptado",
+		Estudio:         estudioType,
+		Sexo:            "",              // Asignar el valor si es necesario
+		Edad:            edad,            // Asignar la edad
+		FechaNacimiento: fechaNacimiento, // Asignar la fecha de nacimiento
+		FechaEstudio:    fechaEstudio,    // Asignar la fecha de estudio
+		Imagenes: []Imagen{
+			{
+				Dicom:       fileIDStr, // Referencia al ID del archivo DICOM en GridFS
+				Imagen:      fileIDStr, // Usar el mismo ID o ajustar según sea necesario
+				Anonimizada: false,     // Ajustar según sea necesario
+			},
+		},
+		Diagnostico: []Diagnostico{
+			{
+				Proyeccion: "", // Asignar el valor si es necesario
+				Hallazgos:  "", // Asignar el valor si es necesario
+			},
+		},
+	}
+
+	// Insertar el documento en la colección `estudios`
+	studyCollection := db.Collection("estudios")
+	_, err = studyCollection.InsertOne(context.Background(), estudioDoc)
+	if err != nil {
+		log.Printf("Error al insertar el documento del estudio: %v", err)
+		http.Error(w, "Error al insertar el documento del estudio", http.StatusInternalServerError)
+		return
+	}
+	log.Println("Documento del estudio insertado exitosamente")
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Archivo cargado exitosamente"))
