@@ -49,7 +49,7 @@ func ValidarUsuario(db *sql.DB, correo, contrasena string) (bool, string, error)
 	var storedPassword string
 
 	// Consulta para obtener la contraseña almacenada y el ID del usuario
-	err := db.QueryRow("SELECT id, contrasena FROM users WHERE correo = $1", correo).Scan(&id, &storedPassword)
+	err := db.QueryRow("SELECT usuario_id, contrasena FROM users WHERE correo = $1", correo).Scan(&id, &storedPassword)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			// Usuario no encontrado

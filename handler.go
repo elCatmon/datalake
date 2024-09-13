@@ -11,6 +11,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 
 	"github.com/disintegration/imaging"
 	"github.com/gorilla/mux"
@@ -79,17 +80,20 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var credentials User
 	err := json.NewDecoder(r.Body).Decode(&credentials)
 	if err != nil {
+		log.Printf("Error al decodificar los datos: %v", err)
 		http.Error(w, `{"error": "Error al decodificar los datos"}`, http.StatusBadRequest)
 		return
 	}
 
 	isValid, id, authErr := ValidarUsuario(db, credentials.Correo, credentials.Contrasena)
 	if authErr != nil {
+		log.Printf("Error al validar usuario: %v", authErr)
 		http.Error(w, `{"error": "Error interno del servidor"}`, http.StatusInternalServerError)
 		return
 	}
 
 	if !isValid {
+		log.Printf("Intento de inicio de sesión fallido: correo o contraseña incorrectos para el correo %s", credentials.Correo)
 		http.Error(w, `{"error": "Correo o contraseña incorrectos"}`, http.StatusUnauthorized)
 		return
 	}
@@ -97,7 +101,10 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	response := map[string]string{"message": "Inicio de sesión exitoso", "id": id}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("Error al codificar la respuesta JSON: %v", err)
+	}
+	log.Printf("Inicio de sesión exitoso para el correo %s, ID de usuario: %s", credentials.Correo, id)
 }
 
 // UploadHandler maneja la solicitud para cargar una imagen a GridFS.
@@ -170,16 +177,27 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	edadMax := queryParams.Get("edadMax")
 	sexo := queryParams.Get("sexo")
 
-	//Crear filtro para los estudios
-	filter, err := CrearFiltro(w, tipoEstudio, region, edadMin, edadMax, sexo)
+	// Parámetros de paginación
+	pageStr := queryParams.Get("page")
+	limitStr := queryParams.Get("limit")
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1 // Página por defecto si el parámetro es inválido
+	}
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit < 1 {
+		limit = 18 // Límite por defecto si el parámetro es inválido
+	}
 
+	// Crear filtro para los estudios
+	filter, err := CrearFiltro(w, tipoEstudio, region, edadMin, edadMax, sexo)
 	if err != nil {
 		http.Error(w, "Error al crear el filtro", http.StatusInternalServerError)
 		return
 	}
 
-	imageIDs, cursor, error := buscarEstudios(w, studiesCollection, filter)
-	if error != nil {
+	imageIDs, cursor, err := buscarEstudios(w, studiesCollection, filter)
+	if err != nil {
 		http.Error(w, "Error al buscar los estudios", http.StatusInternalServerError)
 		return
 	}
@@ -195,14 +213,24 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 		return
 	}
 
-	if err := cursor.Err(); err != nil {
-		http.Error(w, "Error al iterar sobre los archivos: "+err.Error(), http.StatusInternalServerError)
+	// Aplicar paginación
+	start := (page - 1) * limit
+	end := start + limit
+	if start >= len(imageIDs) {
+		// Si la página solicitada está fuera del rango de IDs disponibles
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode([]string{})
 		return
 	}
+	if end > len(imageIDs) {
+		end = len(imageIDs)
+	}
+	paginatedImageIDs := imageIDs[start:end]
 
-	images, error := BuscarImagenes(w, imageIDs, db)
-	if error != nil {
-
+	images, err := BuscarImagenes(w, paginatedImageIDs, db)
+	if err != nil {
+		http.Error(w, "Error al buscar imágenes", http.StatusInternalServerError)
+		return
 	}
 
 	// Devolver la lista de URLs de las miniaturas

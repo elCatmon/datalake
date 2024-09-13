@@ -8,7 +8,7 @@ import (
 
 // User representa un usuario en la base de datos.
 type User struct {
-	ID           string `json:"id"`
+	ID           string `json:"usuario_id"`
 	Nombre       string `json:"nombre"`
 	ApellidoP    string `json:"apellido_Paterno"`
 	ApellidoM    string `json:"apellido_Materno"`
