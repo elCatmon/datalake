@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"mime/multipart"
@@ -279,12 +280,14 @@ func ProcesarDonacionFisica(w http.ResponseWriter, r *http.Request) ([]interface
 	originalFiles := formData.File["archivosOriginales"]
 	anonymizedFiles := formData.File["archivosAnonimizados"]
 
-	if originalFiles == nil || anonymizedFiles == nil {
-		http.Error(w, "No images field found", http.StatusBadRequest)
+	if originalFiles == nil || len(originalFiles) == 0 {
+		http.Error(w, "No original files uploaded", http.StatusBadRequest)
+		return nil, errors.New("no original files uploaded")
 	}
 
-	if len(originalFiles) == 0 || len(anonymizedFiles) == 0 {
-		http.Error(w, "No images uploaded", http.StatusBadRequest)
+	if anonymizedFiles == nil || len(anonymizedFiles) == 0 {
+		http.Error(w, "No anonymized files uploaded", http.StatusBadRequest)
+		return nil, errors.New("no anonymized files uploaded")
 	}
 
 	datos := []interface{}{estudioID, region, hash, estudio, sexo, edad, fechaNacimientoParsed, fechaEstudioParsed, proyeccion, hallazgos, originalFiles, anonymizedFiles}
@@ -309,10 +312,20 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 	edad, _ := datos[5].(int)
 	fechaNacimiento, _ := datos[6].(time.Time)
 	fechaEstudio, _ := datos[7].(time.Time)
-	proyeccion, _ := datos[7].(string)
-	hallazgos, _ := datos[8].([]string)
-	originalFiles, _ := datos[9].([]*multipart.FileHeader)
-	anonymizedFiles, _ := datos[10].([]*multipart.FileHeader)
+	proyeccion, _ := datos[8].(string) // Este era el índice 7, debería ser 8
+	hallazgos, _ := datos[9].([]string)
+	originalFiles, _ := datos[10].([]*multipart.FileHeader)
+	anonymizedFiles, _ := datos[11].([]*multipart.FileHeader) // Asegúrate de que el índice sea correcto
+
+	// Verificar la longitud de los slices antes de usarlos
+	if len(originalFiles) == 0 {
+		http.Error(w, "No original files available", http.StatusBadRequest)
+		return
+	}
+	if len(anonymizedFiles) == 0 {
+		http.Error(w, "No anonymized files available", http.StatusBadRequest)
+		return
+	}
 
 	var imagenes []Imagen
 
