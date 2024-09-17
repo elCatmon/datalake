@@ -12,7 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var ip = "http://10.0.29.64:8080"
+var ip = "http://192.168.100.3:8080"
 
 //const uploadDir = "./archivosSub"
 
