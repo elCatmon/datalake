@@ -83,12 +83,9 @@ type Diagnostico struct {
 type EstudioDocument struct {
 	ID              primitive.ObjectID `bson:"_id,omitempty"`
 	EstudioID       string             `bson:"estudio_ID"`
-	Region          string             `bson:"region"`
 	Hash            string             `bson:"hash"`
 	Status          string             `bson:"status"`
-	Estudio         string             `bson:"estudio"`
-	Sexo            string             `bson:"sexo"`
-	Edad            int                `bson:"edad"`
+	Clave           string             `bson:"clave"`
 	FechaNacimiento time.Time          `bson:"fecha_nacimiento"`
 	FechaEstudio    time.Time          `bson:"fecha_estudio"`
 	Imagenes        []Imagen           `bson:"imagenes"`

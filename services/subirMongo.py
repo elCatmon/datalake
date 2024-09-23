@@ -70,7 +70,7 @@ def extract_dicom_info(dicom_path):
 def create_estudio_document(estudio_info, image_data):
     estudio_document = {
         "estudio_ID": estudio_info["estudio_ID"],
-        "region": estudio_info["region"],
+        "region": "torso",
         "hash": calculate_file_hash(estudio_info["filename"]),
         "status": "Aceptado",
         "estudio": estudio_info["estudio"],
@@ -99,7 +99,7 @@ def process_files():
 
     estudio_info = {
         "estudio_ID": generate_study_id(),  # Generar un ID único para el estudio
-        "estudio": "TomografiaComputarizada",  # Tipo de estudio por defecto
+        "estudio": "Radiografia",  # Tipo de estudio por defecto
         "sexo": "N/A",
         "edad": None,
         "fecha_nacimiento": None,
