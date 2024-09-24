@@ -46,6 +46,11 @@ func main() {
 		handleImportar(w, r, bucket, database)
 	}).Methods("POST")
 
+	// Ruta para importar archivos y datos
+	r.HandleFunc("/diagnosticos", func(w http.ResponseWriter, r *http.Request) {
+		CreateDiagnosticoHandler(w, r, database)
+	}).Methods("POST")
+
 	// Configuración de CORS usando handlers.CORS
 	corsHandler := handlers.CORS(
 		handlers.AllowedOrigins([]string{"*"}),                      // Permite solicitudes desde localhost:3000
