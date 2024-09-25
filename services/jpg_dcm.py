@@ -1,18 +1,20 @@
 import pydicom
 import os
+import sys
 from pydicom.dataset import FileDataset
 import numpy as np
 from PIL import Image
 import datetime
 from pydicom.uid import ExplicitVRLittleEndian
+import logging
 
 # Funcion para convertir de DICOM aJPG
-def jpg_to_dicom(file_path):
+def jpg_to_dicom(input_file_path, output_file_path):
         # Generación de rutas de archivos
-        dicom_file_path = os.path.splitext(file_path)[0] + ".dcm"
+        input_file_path = os.path.splitext(input_file_path)[0] + ".dcm"
 
         # Abrir la imagen JPG usando PIL
-        img = Image.open(file_path)
+        img = Image.open(input_file_path)
         img = img.convert('L')  # Convertir a escala de grises
 
         # Redimensionar la imagen a 4096x4096
@@ -27,7 +29,7 @@ def jpg_to_dicom(file_path):
         file_meta.ImplementationClassUID = pydicom.uid.PYDICOM_IMPLEMENTATION_UID
 
         # Definir los detalles del archivo DICOM
-        ds = FileDataset(dicom_file_path, {}, file_meta=file_meta, preamble=b"\0" * 128)
+        ds = FileDataset(input_file_path, {}, file_meta=file_meta, preamble=b"\0" * 128)
 
         # Establecer fechas y horas actuales
         dt = datetime.datetime.now()
@@ -67,4 +69,16 @@ def jpg_to_dicom(file_path):
 
         # Guardar el archivo DICOM con la Transfer Syntax seleccionada
         ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
-        ds.save_as(dicom_file_path, write_like_original=False)
+        ds.save_as(output_file_path, write_like_original=False)
+
+        return output_file_path
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        logging.error("Uso incorrecto. Se requieren dos argumentos: (ruta del archivo DICOM, ruta del archivo de salida).")
+        sys.exit(1)
+
+    input_file_path = sys.argv[1]
+    output_file_path = sys.argv[2]
+    logging.info(f"Script iniciado con el archivo: {input_file_path}")
+    jpg_to_dicom(input_file_path, output_file_path)

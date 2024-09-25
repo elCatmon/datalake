@@ -103,12 +103,20 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 }
 
 func UploadHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket, database *mongo.Database) {
-	// Leer el archivo cargado
-	log.Printf("Archivo recibido: %s", fileHeader.Filename)
-	SubirDonacionDigital(w, bucket, r, database)
+	// Ejecutar la función de procesamiento
+	err := SubirDonacionDigital(w, bucket, r, database)
+
+	// Si ocurrió un error en SubirDonacionDigital, no es necesario llamar a WriteHeader ni Write de nuevo
+	if err != nil {
+		log.Printf("Error durante la carga: %v", err)
+		return // La respuesta de error ya ha sido enviada dentro de SubirDonacionDigital
+	}
+
+	// Si todo salió bien, registrar la inserción exitosa
 	log.Println("Documento del estudio insertado exitosamente")
 
-	w.WriteHeader(http.StatusOK)
+	// Enviar la respuesta exitosa
+	w.WriteHeader(http.StatusOK) // Solo se llama aquí si todo fue exitoso
 	w.Write([]byte("Archivo cargado exitosamente"))
 }
 

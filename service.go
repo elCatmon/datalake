@@ -15,18 +15,19 @@ import (
 	"image/jpeg"
 	"io"
 	"log"
-	"math/rand"
 	"mime/multipart"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
-	"time"
 
 	"github.com/disintegration/imaging"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/gridfs"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -252,11 +253,6 @@ func ProcesarDonacionFisica(w http.ResponseWriter, r *http.Request) ([]interface
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 
-	hallazgos := formData.Value["hallazgos"]
-	if len(hallazgos) == 0 {
-		hallazgos = []string{"N/A"} // Valor por defecto si hallazgos no está presente
-	}
-
 	donador, err := getValueOrError(formData.Value, "donador")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -310,8 +306,14 @@ func subirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 	proyeccion, _ := datos[8].(string)
 	anonymizedFiles, _ := datos[9].([]*multipart.FileHeader)
 	originalFiles, _ := datos[10].([]*multipart.FileHeader)
-	clave := estudio + "0" + "1" + valida + region + proyeccion + sexo + edad
-
+	log.Print(estudio)
+	log.Print(valida)
+	log.Print(region)
+	log.Print(proyeccion)
+	log.Print(sexo)
+	log.Print(edad)
+	clave := estudio + "0" + "1" + valida + region + "00" + sexo + edad
+	log.Print(clave)
 	// Verificar la longitud de los slices antes de usarlos
 	if len(originalFiles) == 0 {
 		http.Error(w, "No hay archivos originales", http.StatusBadRequest)
@@ -334,8 +336,10 @@ func subirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 		}
 
 		imagenes = append(imagenes, Imagen{
+			Clave:       clave,
+			Dicom:       fileID,
 			Imagen:      fileID,
-			Anonimizada: false, // Archivo original
+			Anonimizada: false,
 		})
 	}
 
@@ -348,9 +352,9 @@ func subirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 		}
 		imagenes = append(imagenes, Imagen{
 			Clave:       clave,
-			Dicom:       fileIDStr,
+			Dicom:       fileID,
 			Imagen:      fileID,
-			Anonimizada: false,
+			Anonimizada: true,
 		})
 	}
 
@@ -412,26 +416,6 @@ func subirArchivoGridFS(fileHeader *multipart.FileHeader, bucket *gridfs.Bucket)
 	return uploadStream.FileID.(primitive.ObjectID).Hex(), nil
 }
 
-// Función para parsear fechas y usar la fecha actual si la fecha es inválida o vacía
-func parseDate(dateStr string) (time.Time, error) {
-	if dateStr == "" {
-		return time.Now(), nil
-	}
-
-	fecha, err := time.Parse("2006-01-02", dateStr)
-	if err != nil {
-		return time.Now(), nil
-	}
-	return fecha, nil
-}
-
-// Función para generar un ID de estudio de 12 dígitos
-func generateStudyID() string {
-	rand.Seed(time.Now().UnixNano())
-	id := rand.Intn(1000000000000)  // Genera un número aleatorio de hasta 12 dígitos
-	return fmt.Sprintf("%012d", id) // Formatea el número a 12 dígitos
-}
-
 // CreateDiagnostico guarda un diagnóstico en el estudio correspondiente
 func CreateDiagnostico(db *mongo.Database, estudioID string, diagnostico Diagnostico) error {
 	collection := db.Collection("estudios")
@@ -461,84 +445,139 @@ func CreateDiagnostico(db *mongo.Database, estudioID string, diagnostico Diagnos
 	return nil
 }
 
-func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.Request, database *mongo.Database) {
-	file, fileHeader, err := r.FormFile("files")
-	// Leer el archivo cargado
-	log.Printf("Archivo recibido: %s", fileHeader.Filename)
+func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.Request, database *mongo.Database) error {
+	log.Println("Iniciando procesamiento de donación digital")
+	err := r.ParseMultipartForm(10 << 20) // Límite de 10MB por archivo
 	if err != nil {
-		log.Printf("Error al leer el archivo: %v", err)
-		http.Error(w, "Error al leer el archivo", http.StatusBadRequest)
-		return
+		log.Printf("Error al parsear el formulario: %v", err)
+		http.Error(w, "Error al procesar los archivos", http.StatusBadRequest)
+		return err
 	}
-	defer file.Close()
 
-	// Leer tipo de estudio
-	estudioType := r.FormValue("tipoEstudio")
-	if estudioType == "" {
-		log.Println("Tipo de estudio no proporcionado")
-		http.Error(w, "Tipo de estudio es requerido", http.StatusBadRequest)
-		return
+	files := r.MultipartForm.File["files"]
+	if len(files) == 0 {
+		log.Println("No se proporcionaron archivos")
+		http.Error(w, "Debe proporcionar al menos un archivo", http.StatusBadRequest)
+		return fmt.Errorf("no se proporcionaron archivos")
 	}
-	log.Printf("Tipo de estudio: %s", estudioType)
 
-	// Leer y convertir la edad
-	edad := r.FormValue("edad")
-	var edad int
-	if edadStr == "" {
-		edad = 0
-	} else {
-		edad, err = strconv.Atoi(edadStr)
+	var imagenes []Imagen
+	var anonymizedFiles []string
+	var jpgFiles []string
+
+	// Iterar sobre cada archivo enviado
+	for _, fileHeader := range files {
+		log.Printf("Procesando archivo: %s", fileHeader.Filename)
+
+		// Abrir el archivo subido
+		file, err := fileHeader.Open()
 		if err != nil {
-			log.Println("Edad no válida")
-			http.Error(w, "Edad debe ser un número entero", http.StatusBadRequest)
-			return
+			log.Printf("Error al abrir el archivo %s: %v", fileHeader.Filename, err)
+			http.Error(w, "Error al abrir el archivo", http.StatusBadRequest)
+			continue // Continuar con el siguiente archivo
 		}
+		defer file.Close()
+
+		// Guardar el archivo temporalmente
+		tempFilePath := "./archivos/" + fileHeader.Filename
+		log.Printf("Guardando archivo temporal: %s", tempFilePath)
+		tempFile, err := os.Create(tempFilePath)
+		if err != nil {
+			log.Printf("Error al crear el archivo temporal %s: %v", tempFilePath, err)
+			http.Error(w, "Error al crear el archivo temporal", http.StatusInternalServerError)
+			continue
+		}
+		defer tempFile.Close()
+
+		_, err = io.Copy(tempFile, file)
+		if err != nil {
+			log.Printf("Error al copiar el archivo %s: %v", fileHeader.Filename, err)
+			http.Error(w, "Error al copiar el archivo", http.StatusInternalServerError)
+			continue
+		}
+
+		// Anonimizar el archivo
+		anonFilePath := tempFilePath + "_M.dcm"
+		log.Printf("Anonimizando archivo %s a %s", tempFilePath, anonFilePath)
+		err = anonimizarArchivo(tempFilePath, anonFilePath)
+		if err != nil {
+			log.Printf("Error al anonimizar el archivo %s: %v", tempFilePath, err)
+			http.Error(w, "Error al anonimizar el archivo", http.StatusInternalServerError)
+			continue
+		}
+
+		jpgtempFilePath := filepath.Ext(anonFilePath) + ".jpg"
+		err = convertirArchivo(anonFilePath, jpgtempFilePath)
+		if err != nil {
+			log.Printf("Error al convertir el archivo %s: %v", tempFilePath, err)
+			http.Error(w, "Error al convertir el archivo", http.StatusInternalServerError)
+			continue
+		}
+
+		// Guardar rutas de archivos anonimizados y JPG
+		anonymizedFiles = append(anonymizedFiles, anonFilePath)
+		jpgFiles = append(jpgFiles, jpgtempFilePath)
+
+		// Limpieza de archivos temporales
+		log.Printf("Eliminando archivo temporal %s", tempFilePath)
+		os.Remove(tempFilePath)
 	}
 
-	// Crear un nuevo upload stream en GridFS
-	filename := fmt.Sprintf("%s_%d", time.Now().Format("20060102150405"), time.Now().UnixNano())
-	log.Printf("Nombre del archivo para GridFS: %s", filename)
-
-	uploadStream, err := bucket.OpenUploadStream(filename, options.GridFSUpload().SetMetadata(bson.M{"filename": fileHeader.Filename}))
+	// Crear una clave única para los archivos
+	estudioID := primitive.NewObjectID().Hex()
+	donador := "DonadorEjemplo" // Valor ejemplo, reemplazar por el valor correcto
+	estudio, err := getValueOrError(r.MultipartForm.Value, "tipoEstudio")
 	if err != nil {
-		log.Printf("Error al crear el upload stream: %v", err)
-		http.Error(w, "Error al crear el upload stream", http.StatusInternalServerError)
-		return
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return err
 	}
-	defer uploadStream.Close()
+	hash := generateHash(donador, estudio)
+	clave := estudio + "0" + "1" + "0" + "00" + "00" + "0" + "0"
+	log.Printf("Generando documento de estudio con ID: %s", estudioID)
 
-	// Copiar el archivo al upload stream
-	_, err = io.Copy(uploadStream, file)
-	if err != nil {
-		log.Printf("Error al copiar el archivo al upload stream: %v", err)
-		http.Error(w, "Error al copiar el archivo al upload stream", http.StatusInternalServerError)
-		return
+	// Subir archivos originales a GridFS y crear el documento del estudio
+	for _, fileHeader := range files {
+		log.Printf("Subiendo archivo original %s a GridFS", fileHeader.Filename)
+		fileID := subirArchivoDigitalGridFS("./archivos/"+fileHeader.Filename, bucket)
+		if fileID == "" {
+			log.Printf("Fallo al subir el archivo original %s", fileHeader.Filename)
+			http.Error(w, "Fallo al subir a la base de datos los archivos originales", http.StatusInternalServerError)
+			continue
+		}
+		imagenes = append(imagenes, Imagen{
+			Clave:       clave,
+			Dicom:       fileID,
+			Imagen:      "",
+			Anonimizada: false,
+		})
 	}
-	log.Printf("Archivo copiado al upload stream exitosamente")
 
-	// Obtener el FileID del archivo subido
-	fileID := uploadStream.FileID.(primitive.ObjectID)
-	fileIDStr := fileID.Hex()
+	// Subir archivos anonimizados y JPG a GridFS
+	for i := range anonymizedFiles {
+		log.Printf("Subiendo archivo anonimizado %s a GridFS", anonymizedFiles[i])
+		fileID := subirArchivoDigitalGridFS(anonymizedFiles[i], bucket)
+		jpgID := subirArchivoDigitalGridFS(jpgFiles[i], bucket)
 
-	// Generar un ID de estudio de 12 dígitos
-	studyID := generateStudyID()
-
-	clave := estudio + "0" + "2" + "0" + "N/A" + "N/A" + "0" + edad
+		if fileID == "" || jpgID == "" {
+			log.Printf("Fallo al subir los archivos %s o %s", anonymizedFiles[i], jpgFiles[i])
+			http.Error(w, "Fallo al subir a la base de datos los archivos anonimizados", http.StatusInternalServerError)
+			continue
+		}
+		imagenes = append(imagenes, Imagen{
+			Clave:       clave,
+			Dicom:       fileID,
+			Imagen:      jpgID,
+			Anonimizada: true,
+		})
+	}
 
 	// Crear el documento del estudio
 	estudioDoc := EstudioDocument{
-		EstudioID: studyID, // Guardar el ID de estudio generado
+		EstudioID: estudioID,
 		Donador:   donador,
-		Hash:      "", // Asignar el hash si es necesario
+		Hash:      hash,
 		Status:    0,
-		Imagenes: []Imagen{
-			{
-				Clave:       clave,
-				Dicom:       fileIDStr, // Referencia al ID del archivo DICOM en GridFS
-				Imagen:      fileIDStr, // Usar el mismo ID o ajustar según sea necesario
-				Anonimizada: false,     // Ajustar según sea necesario
-			},
-		},
+		Imagenes:  imagenes,
 		Diagnostico: []Diagnostico{
 			{
 				Hallazgos:     "",
@@ -547,15 +586,104 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 			},
 		},
 	}
+	log.Println("Insertando el documento de estudio en MongoDB")
 
-	// Insertar el documento en la colección `estudios`
-	studyCollection := database.Collection("estudios")
-	_, err = studyCollection.InsertOne(context.Background(), estudioDoc)
+	// Insertar el documento en MongoDB
+	collection := database.Collection("estudios")
+	_, err = collection.InsertOne(context.Background(), estudioDoc)
 	if err != nil {
-		log.Printf("Error al insertar el documento del estudio: %v", err)
-		http.Error(w, "Error al insertar el documento del estudio", http.StatusInternalServerError)
-		return
+		log.Printf("Fallo al insertar el documento de estudio: %v", err)
+		http.Error(w, "Fallo al insertar el documento", http.StatusInternalServerError)
+		return err
 	}
+
+	// Respuesta de éxito
+	log.Println("Todos los archivos han sido procesados exitosamente y el estudio ha sido registrado.")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Todos los archivos han sido procesados exitosamente y el estudio ha sido registrado."))
+
+	return nil
 }
+
+// Función para subir archivos a GridFS
+func subirArchivoDigitalGridFS(filePath string, bucket *gridfs.Bucket) string {
+	log.Printf("Subiendo archivo a GridFS: %s", filePath)
+
+	// Abrir el archivo para subir a GridFS
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Printf("Error al abrir archivo para subir a GridFS: %s, error: %v", filePath, err)
+		return ""
+	}
+	defer file.Close()
+
+	// Crear el archivo en GridFS
+	uploadStream, err := bucket.OpenUploadStream(filepath.Base(filePath))
+	if err != nil {
+		log.Printf("Error al abrir flujo de subida en GridFS para %s: %v", filePath, err)
+		return ""
+	}
+	defer uploadStream.Close()
+
+	// Copiar el contenido del archivo al flujo de subida
+	_, err = io.Copy(uploadStream, file)
+	if err != nil {
+		log.Printf("Error al copiar archivo al flujo de subida en GridFS: %s, error: %v", filePath, err)
+		return ""
+	}
+
+	// Obtener el ID del archivo subido
+	fileID := uploadStream.FileID.(primitive.ObjectID)
+	log.Printf("Archivo subido a GridFS con ID: %s", fileID.Hex())
+	return fileID.Hex()
+}
+
+// Función para ejecutar el script de anonimización
+func anonimizarArchivo(tempFilePath, anonFilePath string) error {
+	log.Printf("Ejecutando script de anonimización para %s", tempFilePath)
+	var cmd *exec.Cmd
+
+	// Detectar el sistema operativo
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("python", "./services/anonimizacion.py", tempFilePath, anonFilePath)
+	} else {
+		cmd = exec.Command("python3", "./services/anonimizacion.py", tempFilePath, anonFilePath)
+	}
+
+	// Ejecutar el comando
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Error al ejecutar el script de anonimización: %v, output: %s", err, string(output))
+		return fmt.Errorf("error al ejecutar el script de anonimización: %w", err)
+	}
+
+	log.Printf("Script de anonimización ejecutado correctamente para %s", tempFilePath)
+	return nil
+}
+
+func convertirArchivo(tempFilePath, jpgFilePath string) error {
+	log.Printf("Ejecutando script de anonimización para %s", tempFilePath)
+	var cmd *exec.Cmd
+
+	// Detectar el sistema operativo
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("python", "./services/dcm_jpg.py", tempFilePath, jpgFilePath)
+	} else {
+		cmd = exec.Command("python3", "./services/dcm_jpg.py", tempFilePath, jpgFilePath)
+	}
+
+	// Ejecutar el comando
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Error al ejecutar el script de anonimización: %v, output: %s", err, string(output))
+		return fmt.Errorf("error al ejecutar el script de anonimización: %w", err)
+	}
+
+	log.Printf("Script de anonimización ejecutado correctamente para %s", tempFilePath)
+
+	return nil
+}
+
+// Conversion de archivos
 
 // Descarga conjunto de datos

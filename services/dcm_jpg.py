@@ -1,18 +1,14 @@
 import pydicom
-import os
+import sys
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 import numpy as np
 from PIL import Image
+import logging
 
 # Función para convertir de DICOM a JPG
-def dicom_to_jpeg(file_path):
-        # Obtener el directorio contenedor del archivo DICOM
-        output_dir = os.path.dirname(file_path)
-        # Crear el nombre del archivo de salida
-        output_file = os.path.join(output_dir, os.path.splitext(os.path.basename(file_path))[0] + ".jpg")
+def dicom_to_jpeg(input_file_path, output_file_path):
         # Cargar el archivo DICOM
-        ds = pydicom.dcmread(file_path)
-
+        ds = pydicom.dcmread(input_file_path)
         # Aplicar VOI LUT si está presente en el archivo DICOM
         if 'PixelData' in ds:
             try:
@@ -31,8 +27,18 @@ def dicom_to_jpeg(file_path):
             if img.mode != 'L':
                 img = img.convert('L')
             # Redimensionar la imagen si es necesario
-            img = img.resize((4096, 4096), Image.LANCZOS)
+            img = img.resize((150, 150), Image.LANCZOS)
             # Guardar la imagen como JPEG
-            img.save(output_file, "JPEG")
+            img.save(output_file_path, "JPEG")
         else:
             print("El archivo DICOM no contiene datos de píxeles (PixelData).")
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        logging.error("Uso incorrecto. Se requieren dos argumentos: (ruta del archivo DICOM, ruta del archivo de salida).")
+        sys.exit(1)
+
+    input_file_path = sys.argv[1]
+    output_file_path = sys.argv[2]
+    logging.info(f"Script iniciado con el archivo: {input_file_path}")
+    dicom_to_jpeg(input_file_path, output_file_path)
