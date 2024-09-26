@@ -8,8 +8,9 @@ import (
 	"github.com/gorilla/handlers" // Importa el paquete de handlers
 	"github.com/gorilla/mux"
 
-	"webservice/Handlers"
+	"webservice/Handl"
 	"webservice/config"
+	"webservice/middleware"
 )
 
 func main() {
@@ -25,34 +26,38 @@ func main() {
 
 	// Definir las rutas
 	r.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-		Handlers.RegisterHandler(w, r, db)
+		Handl.RegisterHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		Handlers.LoginHandler(w, r, db)
+		Handl.LoginHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/donacion", func(w http.ResponseWriter, r *http.Request) {
-		Handlers.UploadHandler(w, r, bucket, database)
+		Handl.UploadHandler(w, r, bucket, database)
 	}).Methods("POST")
 
 	r.HandleFunc("/image/{filename:[a-zA-Z0-9_\\-\\.]+}", func(w http.ResponseWriter, r *http.Request) {
-		Handlers.ImageHandler(w, r, bucket)
+		Handl.ImageHandler(w, r, bucket)
 	}).Methods("GET")
 
 	r.HandleFunc("/thumbnails", func(w http.ResponseWriter, r *http.Request) {
-		Handlers.ThumbnailHandler(w, r, client.Database("bdmdm"))
+		Handl.ThumbnailHandler(w, r, client.Database("bdmdm"))
 	}).Methods("GET")
 
 	// Ruta para importar archivos y datos
 	r.HandleFunc("/importar", func(w http.ResponseWriter, r *http.Request) {
-		Handlers.ImportarHandler(w, r, bucket, database)
+		Handl.ImportarHandler(w, r, bucket, database)
 	}).Methods("POST")
 
 	// Ruta para generar diagnosticos de las imagenes
 	r.HandleFunc("/diagnosticos", func(w http.ResponseWriter, r *http.Request) {
-		Handlers.CreateDiagnosticoHandler(w, r, database)
+		Handl.CreateDiagnosticoHandler(w, r, database)
 	}).Methods("POST")
+
+	// Aplicar el middleware de logging y CORS
+	r.Use(middleware.LoggingMiddleware) // Aplica LoggingMiddleware a todas las rutas
+	r.Use(middleware.CORSMiddleware)    // Aplica CORSMiddleware a todas las rutas
 
 	// Configuración de CORS usando handlers.CORS
 	corsHandler := handlers.CORS(

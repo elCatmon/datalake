@@ -12,9 +12,11 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var IP string = "http://10.0.15.94:8080"
+var ip string = "http://10.0.15.94:8080"
 
-//const uploadDir = "./archivosSub"
+func GetIP() string {
+	return ip
+}
 
 // InitializeDatabase configura la conexión a PostgreSQL.
 func InitializeDatabase() *sql.DB {

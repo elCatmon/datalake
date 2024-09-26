@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"webservice/config"
 	"webservice/models"
 
@@ -79,6 +78,7 @@ func ValidarUsuario(db *sql.DB, correo, contrasena string) (bool, string, error)
 	return true, id, nil
 }
 
+// generadores
 // HashPassword genera el hash de una contraseña utilizando bcrypt.
 func HashContraseña(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -89,13 +89,14 @@ func HashContraseña(password string) (string, error) {
 }
 
 // Función para generar un hash SHA-256
-func generateHash(donador, numOperacion string) string {
+func GenerateHash(donador, numOperacion string) string {
 	hashInput := donador + numOperacion
 	hash := sha256.New()
 	hash.Write([]byte(hashInput))
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
+// Busqueda de errores
 // Función para obtener valores del formulario o devolver un error si el campo no existe
 func getValueOrError(formData map[string][]string, key string) (string, error) {
 	values, ok := formData[key]
@@ -117,46 +118,88 @@ func EncontrarImagen(bucket *gridfs.Bucket, filename string) (*gridfs.DownloadSt
 	return downloadStream, nil
 }
 
-// Crear filtro de busqueda de estudios
-func CrearFiltro(w http.ResponseWriter, tipoEstudio string, region string, edadMin string, edadMax string, sexo string) (bson.M, error) {
-	// Crear el filtro de búsqueda para estudios
+// Crear filtro de búsqueda de estudios basados en la clave personalizada
+func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
+	tipoEstudio := r.URL.Query().Get("tipoEstudio")
+	origen := r.URL.Query().Get("origen")
+	obtencion := r.URL.Query().Get("obtencion")
+	valido := r.URL.Query().Get("valido")
+	region := r.URL.Query().Get("region")
+	proyeccion := r.URL.Query().Get("proyeccion")
+	sexo := r.URL.Query().Get("sexo")
+	edad := r.URL.Query().Get("edad")
+
+	// Crear el filtro de búsqueda para estudios con los filtros obligatorios
 	filter := bson.M{
 		"imagenes": bson.M{
 			"$elemMatch": bson.M{
-				"anonimizada": true,
+				"anonimizada": true, // Filtro obligatorio: imagen anonimizada
 			},
 		},
-		"status": "Aceptado",
+		"status": 1, // Filtro obligatorio: status activo
 	}
 
-	// Agregar filtros opcionales a la consulta de estudios
+	// Filtro obligatorio por tipo de estudio (primeros 2 dígitos de la clave)
 	if tipoEstudio != "" {
-		filter["estudio"] = tipoEstudio
+		filter["imagenes.clave"] = bson.M{
+			"$regex": "^" + tipoEstudio, // Filtro por tipo de estudio
+		}
+	} else {
+		// Retornar error si el tipo de estudio no se especifica, ya que es obligatorio
+		return nil, fmt.Errorf("el campo tipoEstudio es obligatorio")
 	}
+
+	// Filtros opcionales
+
+	// Filtro por origen (3er dígito de la clave)
+	if origen != "" {
+		filter["imagenes.clave"] = bson.M{
+			"$regex": "^.{2}" + origen, // Filtra por origen si está presente
+		}
+	}
+
+	// Filtro por obtención (4to dígito de la clave)
+	if obtencion != "" {
+		filter["imagenes.clave"] = bson.M{
+			"$regex": "^.{3}" + obtencion, // Filtra por obtención si está presente
+		}
+	}
+
+	// Filtro por si es válida (5to dígito de la clave)
+	if valido != "" {
+		filter["imagenes.clave"] = bson.M{
+			"$regex": "^.{4}" + valido, // Filtra por validez si está presente
+		}
+	}
+
+	// Filtro por región (6to y 7mo dígito de la clave)
 	if region != "" {
-		filter["region"] = region
-	}
-	if edadMin != "" || edadMax != "" {
-		edadFilter := bson.M{}
-		if edadMin != "" {
-			edadMinInt, err := strconv.Atoi(edadMin)
-			if err != nil {
-				http.Error(w, "Edad mínima inválida", http.StatusBadRequest)
-			}
-			edadFilter["$gte"] = edadMinInt
+		filter["imagenes.clave"] = bson.M{
+			"$regex": "^.{5}" + region, // Filtra por región si está presente
 		}
-		if edadMax != "" {
-			edadMaxInt, err := strconv.Atoi(edadMax)
-			if err != nil {
-				http.Error(w, "Edad máxima inválida", http.StatusBadRequest)
-			}
-			edadFilter["$lte"] = edadMaxInt
-		}
-		filter["edad"] = edadFilter
 	}
+
+	// Filtro por proyección (8vo y 9no dígito de la clave)
+	if proyeccion != "" {
+		filter["imagenes.clave"] = bson.M{
+			"$regex": "^.{7}" + proyeccion, // Filtra por proyección si está presente
+		}
+	}
+
+	// Filtro por sexo (10mo dígito de la clave)
 	if sexo != "" {
-		filter["sexo"] = sexo
+		filter["imagenes.clave"] = bson.M{
+			"$regex": "^.{9}" + sexo, // Filtra por sexo si está presente
+		}
 	}
+
+	// Filtro por edad (11mo dígito de la clave)
+	if edad != "" {
+		filter["imagenes.clave"] = bson.M{
+			"$regex": "^.{10}" + edad, // Filtra por edad si está presente
+		}
+	}
+
 	return filter, nil
 }
 
@@ -216,7 +259,7 @@ func BuscarImagenes(w http.ResponseWriter, imageIDs []primitive.ObjectID, db *mo
 		// Obtener el nombre del archivo y construir la URL
 		filename := fileInfo.Filename
 		if filename != "" {
-			imageURL := config.IP + "/image/" + filename
+			imageURL := config.GetIP() + "/image/" + filename
 			images = append(images, imageURL)
 		}
 	}
@@ -260,11 +303,6 @@ func ProcesarDonacionFisica(w http.ResponseWriter, r *http.Request) ([]interface
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 
-	proyeccion, err := getValueOrError(formData.Value, "proyeccion")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-	}
-
 	donador, err := getValueOrError(formData.Value, "donador")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -276,7 +314,7 @@ func ProcesarDonacionFisica(w http.ResponseWriter, r *http.Request) ([]interface
 	}
 
 	// Generar el hash a partir del nombre del donador y el número de operación
-	hash := generateHash(donador, numeroOperacion)
+	hash := GenerateHash(donador, numeroOperacion)
 
 	// Procesamiento de archivos originales
 	originalFiles := formData.File["archivosOriginales"]
@@ -292,38 +330,9 @@ func ProcesarDonacionFisica(w http.ResponseWriter, r *http.Request) ([]interface
 		return nil, errors.New("no anonymized files uploaded")
 	}
 
-	datos := []interface{}{estudioID, donador, estudio, hash, region, valida, sexo, edad, proyeccion, anonymizedFiles, originalFiles}
+	datos := []interface{}{estudioID, donador, estudio, hash, region, valida, sexo, edad, anonymizedFiles, originalFiles}
 
 	return datos, err
-}
-
-// CreateDiagnostico guarda un diagnóstico en el estudio correspondiente
-func CreateDiagnostico(db *mongo.Database, estudioID string, diagnostico models.Diagnostico) error {
-	collection := db.Collection("estudios")
-
-	// Encuentra el documento correspondiente al estudioID
-	filter := bson.M{"estudio_ID": estudioID} // Usamos estudio_ID para filtrar
-	log.Printf("Buscando estudio con estudio_ID: %s", estudioID)
-
-	// Prepara la actualización para agregar el nuevo diagnóstico
-	update := bson.M{
-		"$push": bson.M{"diagnostico": diagnostico}, // Agregar al array de diagnósticos
-	}
-
-	// Ejecuta la actualización
-	result, err := collection.UpdateOne(context.Background(), filter, update)
-	if err != nil {
-		log.Printf("Error al actualizar el diagnóstico: %s", err.Error())
-		return err
-	}
-
-	if result.ModifiedCount == 0 {
-		log.Printf("No se modificó ningún documento para el estudio_ID: %s", estudioID)
-		return fmt.Errorf("no se modificó ningún documento")
-	}
-
-	log.Printf("Diagnóstico guardado exitosamente para estudio_ID: %s", estudioID)
-	return nil
 }
 
 func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.Request, database *mongo.Database) error {
@@ -378,7 +387,9 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 		}
 
 		// Anonimizar el archivo
-		anonFilePath := tempFilePath + "_M.dcm"
+		fileNameWithoutExt := tempFilePath[:len(tempFilePath)-len(filepath.Ext(tempFilePath))]
+		log.Println(fileNameWithoutExt)
+		anonFilePath := fileNameWithoutExt + "_M.dcm"
 		log.Printf("Anonimizando archivo %s a %s", tempFilePath, anonFilePath)
 		err = anonimizarArchivo(tempFilePath, anonFilePath)
 		if err != nil {
@@ -387,7 +398,9 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 			continue
 		}
 
-		jpgtempFilePath := filepath.Ext(anonFilePath) + ".jpg"
+		jpgPathWithoutExt := tempFilePath[:len(tempFilePath)-len(filepath.Ext(tempFilePath))]
+		jpgtempFilePath := jpgPathWithoutExt + ".jpg"
+		log.Println(fileNameWithoutExt)
 		err = convertirArchivo(anonFilePath, jpgtempFilePath)
 		if err != nil {
 			log.Printf("Error al convertir el archivo %s: %v", tempFilePath, err)
@@ -398,10 +411,6 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 		// Guardar rutas de archivos anonimizados y JPG
 		anonymizedFiles = append(anonymizedFiles, anonFilePath)
 		jpgFiles = append(jpgFiles, jpgtempFilePath)
-
-		// Limpieza de archivos temporales
-		log.Printf("Eliminando archivo temporal %s", tempFilePath)
-		os.Remove(tempFilePath)
 	}
 
 	// Crear una clave única para los archivos
@@ -412,8 +421,8 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return err
 	}
-	hash := generateHash(donador, estudio)
-	clave := estudio + "0" + "1" + "0" + "00" + "00" + "0" + "0"
+	hash := GenerateHash(donador, estudio)
+	clave := estudio + "0" + "2" + "0" + "00" + "00" + "0" + "0"
 	log.Printf("Generando documento de estudio con ID: %s", estudioID)
 
 	// Subir archivos originales a GridFS y crear el documento del estudio
@@ -478,6 +487,31 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 		return err
 	}
 
+	for _, anonFilePath := range anonymizedFiles {
+		if err := os.Remove(anonFilePath); err != nil {
+			log.Printf("Error al eliminar el archivo temporal anonimizado %s: %v", anonFilePath, err)
+		} else {
+			log.Printf("Archivo temporal anonimizado %s eliminado exitosamente.", anonFilePath)
+		}
+	}
+
+	for _, jpgFilePath := range jpgFiles {
+		if err := os.Remove(jpgFilePath); err != nil {
+			log.Printf("Error al eliminar el archivo temporal JPG %s: %v", jpgFilePath, err)
+		} else {
+			log.Printf("Archivo temporal JPG %s eliminado exitosamente.", jpgFilePath)
+		}
+	}
+	// Eliminar archivos temporales después de subirlos
+	for _, fileHeader := range files {
+		tempFilePath := "./archivos/" + fileHeader.Filename
+		if err := os.Remove(tempFilePath); err != nil {
+			log.Printf("Error al eliminar el archivo temporal %s: %v", tempFilePath, err)
+		} else {
+			log.Printf("Archivo temporal %s eliminado exitosamente.", tempFilePath)
+		}
+	}
+
 	// Respuesta de éxito
 	log.Println("Todos los archivos han sido procesados exitosamente y el estudio ha sido registrado.")
 	w.WriteHeader(http.StatusOK)
@@ -485,7 +519,3 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 
 	return nil
 }
-
-// Conversion de archivos
-
-// Descarga conjunto de datos

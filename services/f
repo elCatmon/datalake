@@ -1,0 +1,65 @@
+quiero ajustar los siguientes filtros para que busquen en una clave como esta 01010020600, donde los primeros 2 valores corresponden al tipo de estudio, el 3er valor al origen, el 4to a la obtencion, 5to si es valida, 6to y 7mo a la region, 8vo y 9no a la proyeccion, 10mo al sexo y el ultimo a la edad, esta es la estructura de los documentos
+// FileDocument representa un documento en la colección `imagenes.files`.
+type FileDocument struct {
+	ID         primitive.ObjectID `bson:"_id"`
+	Filename   string             `bson:"filename"`
+	Length     int64              `bson:"length"`
+	ChunkSize  int                `bson:"chunkSize"`
+	UploadDate time.Time          `bson:"uploadDate"`
+}
+
+type Imagen struct {
+	Clave       string `bson:"clave"`
+	Dicom       string `bson:"dicom"`
+	Imagen      string `bson:"imagen"`
+	Anonimizada bool   `bson:"anonimizada"`
+}
+
+type Diagnostico struct {
+	Hallazgos     string `bson:"hallazgos"`
+	Impresion     string `bson:"impresion"`
+	Observaciones string `bson:"observaciones"`
+}
+
+type EstudioDocument struct {
+	ID              primitive.ObjectID `bson:"_id,omitempty"`
+	EstudioID       string             `bson:"estudio_ID"`
+	Donador         string             `bson:"donador"`
+	Hash            string             `bson:"hash"`
+	Status          int                `bson:"status"`
+	FechaNacimiento time.Time          `bson:"fecha_nacimiento"`
+	FechaEstudio    time.Time          `bson:"fecha_estudio"`
+	Imagenes        []Imagen           `bson:"imagenes"`
+	Diagnostico     []Diagnostico      `bson:"diagnostico"`
+}
+y este es el filtro
+// Crear filtro de busqueda de estudios
+func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
+	tipoEstudio := r.URL.Query().Get("tipoEstudio")
+	region := r.URL.Query().Get("region")
+	edad := r.URL.Query().Get("edad")
+	sexo := r.URL.Query().Get("sexo")
+	// Crear el filtro de búsqueda para estudios
+	filter := bson.M{
+		"imagenes": bson.M{
+			"$elemMatch": bson.M{
+				"anonimizada": true,
+			},
+		},
+		"status": 1, // Asegúrate de que este valor corresponde a la estructura
+	}
+
+	// Filtro obligatorio para el tipo de estudio
+	filter["estudio_ID"] = tipoEstudio // Cambiar a estudio_ID
+	if region != "" {
+		filter["region"] = region // Ajustar según el campo en EstudioDocument
+	}
+	if sexo != "" {
+		filter["sexo"] = sexo // Asegúrate de que el campo 'sexo' esté en EstudioDocument
+	}
+	if edad != "" {
+		filter["edad"] = edad // Agregar filtro por edad
+	}
+
+	return filter, nil
+}
