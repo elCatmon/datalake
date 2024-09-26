@@ -7,14 +7,18 @@ import (
 
 	"github.com/gorilla/handlers" // Importa el paquete de handlers
 	"github.com/gorilla/mux"
+
+	"webservice/Handl"
+	"webservice/config"
+	"webservice/middleware"
 )
 
 func main() {
 	// Inicializar la base de datos y el cliente MongoDB
-	db := InitializeDatabase()
+	db := config.InitializeDatabase()
 	defer db.Close()
 
-	client, database, bucket := InitializeMongoDBClient()
+	client, database, bucket := config.InitializeMongoDBClient()
 	defer client.Disconnect(context.Background())
 
 	// Crear un enrutador y configurar rutas
@@ -22,33 +26,42 @@ func main() {
 
 	// Definir las rutas
 	r.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-		RegisterHandler(w, r, db)
+		Handl.RegisterHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		LoginHandler(w, r, db)
+		Handl.LoginHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/donacion", func(w http.ResponseWriter, r *http.Request) {
-		UploadHandler(w, r, bucket, database)
+		Handl.UploadHandler(w, r, bucket, database)
 	}).Methods("POST")
 
 	r.HandleFunc("/image/{filename:[a-zA-Z0-9_\\-\\.]+}", func(w http.ResponseWriter, r *http.Request) {
-		ImageHandler(w, r, bucket)
+		Handl.ImageHandler(w, r, bucket)
 	}).Methods("GET")
 
 	r.HandleFunc("/thumbnails", func(w http.ResponseWriter, r *http.Request) {
-		ThumbnailHandler(w, r, client.Database("bdmdm"))
+		Handl.ThumbnailHandler(w, r, client.Database("bdmdm"))
 	}).Methods("GET")
 
 	// Ruta para importar archivos y datos
 	r.HandleFunc("/importar", func(w http.ResponseWriter, r *http.Request) {
-		handleImportar(w, r, bucket, database)
+		Handl.ImportarHandler(w, r, bucket, database)
 	}).Methods("POST")
+
+	// Ruta para generar diagnosticos de las imagenes
+	r.HandleFunc("/diagnosticos", func(w http.ResponseWriter, r *http.Request) {
+		Handl.CreateDiagnosticoHandler(w, r, database)
+	}).Methods("POST")
+
+	// Aplicar el middleware de logging y CORS
+	r.Use(middleware.LoggingMiddleware) // Aplica LoggingMiddleware a todas las rutas
+	r.Use(middleware.CORSMiddleware)    // Aplica CORSMiddleware a todas las rutas
 
 	// Configuración de CORS usando handlers.CORS
 	corsHandler := handlers.CORS(
-		handlers.AllowedOrigins([]string{"*"}),                      // Permite solicitudes desde localhost:3000
+		handlers.AllowedOrigins([]string{"*"}),                      // Permite solicitudes desde cualquier ip
 		handlers.AllowedMethods([]string{"GET", "POST", "OPTIONS"}), // Permite los métodos necesarios
 		handlers.AllowedHeaders([]string{"Content-Type"}),           // Permite los headers necesarios
 	)(r)

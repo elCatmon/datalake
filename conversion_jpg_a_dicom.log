@@ -1,0 +1,69 @@
+2024-09-26 11:06:57,937 - INFO - Script iniciado con el archivo: ./archivos/RX1011_12.jpg
+2024-09-26 11:06:57,938 - INFO - Iniciando conversión de JPG a DICOM para el archivo: ./archivos/RX1011_12.jpg
+2024-09-26 11:06:57,975 - INFO - Archivo JPG abierto exitosamente: ./archivos/RX1011_12.jpg
+2024-09-26 11:06:58,170 - INFO - Imagen convertida a escala de grises
+2024-09-26 11:06:58,347 - INFO - Imagen redimensionada a 4096x4096
+2024-09-26 11:06:58,385 - INFO - Conversión completada exitosamente. Archivo DICOM guardado en: ./archivos/RX1011_12.dcm
+2024-09-26 11:10:39,782 - INFO - Script iniciado con el archivo: ./archivos/RX1011_12.jpg
+2024-09-26 11:10:39,782 - INFO - Iniciando conversión de JPG a DICOM para el archivo: ./archivos/RX1011_12.jpg
+2024-09-26 11:10:39,814 - INFO - Archivo JPG abierto exitosamente: ./archivos/RX1011_12.jpg
+2024-09-26 11:10:39,971 - INFO - Imagen convertida a escala de grises
+2024-09-26 11:10:40,143 - INFO - Imagen redimensionada a 4096x4096
+2024-09-26 11:10:40,193 - INFO - Conversión completada exitosamente. Archivo DICOM guardado en: ./archivos/RX1011_12.dcm
+2024-09-26 11:13:02,676 - INFO - Script iniciado con el archivo: ./archivos/RX1011_12.jpg
+2024-09-26 11:13:02,677 - INFO - Iniciando conversión de JPG a DICOM para el archivo: ./archivos/RX1011_12.jpg
+2024-09-26 11:13:02,711 - INFO - Archivo JPG abierto exitosamente: ./archivos/RX1011_12.jpg
+2024-09-26 11:13:02,865 - INFO - Imagen convertida a escala de grises
+2024-09-26 11:13:03,065 - INFO - Imagen redimensionada a 4096x4096
+2024-09-26 11:13:03,114 - INFO - Conversión completada exitosamente. Archivo DICOM guardado en: ./archivos/RX1011_12.dcm
+2024-09-26 11:17:54,168 - INFO - Script iniciado con el archivo: ./archivos/RX1011_12.jpg
+2024-09-26 11:17:54,169 - INFO - Iniciando conversión de JPG a DICOM para el archivo: ./archivos/RX1011_12.jpg
+2024-09-26 11:17:54,199 - INFO - Archivo JPG abierto exitosamente: ./archivos/RX1011_12.jpg
+2024-09-26 11:17:54,360 - INFO - Imagen convertida a escala de grises
+2024-09-26 11:17:54,532 - INFO - Imagen redimensionada a 4096x4096
+2024-09-26 11:17:54,579 - INFO - Conversión completada exitosamente. Archivo DICOM guardado en: ./archivos/RX1011_12.dcm
+2024-09-26 11:22:06,970 - INFO - Script iniciado con el archivo: ./archivos/RX1011_12.jpg
+2024-09-26 11:22:06,970 - INFO - Iniciando conversión de JPG a DICOM para el archivo: ./archivos/RX1011_12.jpg
+2024-09-26 11:22:07,009 - INFO - Archivo JPG abierto exitosamente: ./archivos/RX1011_12.jpg
+2024-09-26 11:22:07,153 - INFO - Imagen convertida a escala de grises
+2024-09-26 11:22:07,333 - INFO - Imagen redimensionada a 4096x4096
+2024-09-26 11:22:07,380 - INFO - Conversión completada exitosamente. Archivo DICOM guardado en: ./archivos/RX1011_12.dcm
+2024-09-26 11:26:47,018 - INFO - Script iniciado con el archivo: ./archivos/RX1011_12.jpg
+2024-09-26 11:26:47,018 - INFO - Iniciando conversión de JPG a DICOM para el archivo: ./archivos/RX1011_12.jpg
+2024-09-26 11:26:47,047 - INFO - Archivo JPG abierto exitosamente: ./archivos/RX1011_12.jpg
+2024-09-26 11:26:47,185 - INFO - Imagen convertida a escala de grises
+2024-09-26 11:26:47,350 - INFO - Imagen redimensionada a 4096x4096
+2024-09-26 11:26:47,388 - INFO - Conversión completada exitosamente. Archivo DICOM guardado en: ./archivos/RX1011_12.dcm
+2024-09-26 12:22:42,335 - INFO - Script iniciado con el archivo: ./archivos/RX1011_180.jpg
+2024-09-26 12:22:42,335 - INFO - Iniciando conversión de JPG a DICOM para el archivo: ./archivos/RX1011_180.jpg
+2024-09-26 12:22:42,478 - INFO - Archivo JPG abierto exitosamente: ./archivos/RX1011_180.jpg
+2024-09-26 12:22:42,643 - INFO - Imagen convertida a escala de grises
+2024-09-26 12:22:42,813 - INFO - Imagen redimensionada a 4096x4096
+2024-09-26 12:22:42,864 - INFO - Conversión completada exitosamente. Archivo DICOM guardado en: ./archivos/RX1011_180.dcm
+2024-09-26 12:46:49,050 - INFO - Script iniciado con el archivo: ./archivos/RX1011_33.jpg
+2024-09-26 12:46:49,050 - INFO - Iniciando conversión de JPG a DICOM para el archivo: ./archivos/RX1011_33.jpg
+2024-09-26 12:46:49,090 - INFO - Archivo JPG abierto exitosamente: ./archivos/RX1011_33.jpg
+2024-09-26 12:46:49,249 - INFO - Imagen convertida a escala de grises
+2024-09-26 12:46:49,438 - INFO - Imagen redimensionada a 4096x4096
+2024-09-26 12:46:49,483 - INFO - Conversión completada exitosamente. Archivo DICOM guardado en: ./archivos/RX1011_33.dcm
+2024-09-26 12:48:12,328 - INFO - Script iniciado con el archivo: ./archivos/RX1011_33.jpg
+2024-09-26 12:48:12,328 - INFO - Iniciando conversión de JPG a DICOM para el archivo: ./archivos/RX1011_33.jpg
+2024-09-26 12:48:12,366 - INFO - Archivo JPG abierto exitosamente: ./archivos/RX1011_33.jpg
+2024-09-26 12:48:12,539 - INFO - Imagen convertida a escala de grises
+2024-09-26 12:48:12,735 - INFO - Imagen redimensionada a 4096x4096
+2024-09-26 12:48:12,776 - INFO - Conversión completada exitosamente. Archivo DICOM guardado en: ./archivos/RX1011_33.dcm
+2024-09-26 12:48:13,661 - INFO - Script iniciado con el archivo: ./archivos/RX1011_34.jpg
+2024-09-26 12:48:13,661 - INFO - Iniciando conversión de JPG a DICOM para el archivo: ./archivos/RX1011_34.jpg
+2024-09-26 12:48:13,706 - ERROR - Error durante la conversión de JPG a DICOM: [Errno 2] No such file or directory: 'D:\\cesar\\Documents\\DataLakeHouse\\webService\\datalake\\archivos\\RX1011_34.jpg'
+2024-09-26 12:49:35,304 - INFO - Script iniciado con el archivo: ./archivos/RX1011_33.jpg
+2024-09-26 12:49:35,304 - INFO - Iniciando conversión de JPG a DICOM para el archivo: ./archivos/RX1011_33.jpg
+2024-09-26 12:49:35,341 - INFO - Archivo JPG abierto exitosamente: ./archivos/RX1011_33.jpg
+2024-09-26 12:49:35,515 - INFO - Imagen convertida a escala de grises
+2024-09-26 12:49:35,705 - INFO - Imagen redimensionada a 4096x4096
+2024-09-26 12:49:35,748 - INFO - Conversión completada exitosamente. Archivo DICOM guardado en: ./archivos/RX1011_33.dcm
+2024-09-26 12:49:36,620 - INFO - Script iniciado con el archivo: ./archivos/RX1011_34.jpg
+2024-09-26 12:49:36,620 - INFO - Iniciando conversión de JPG a DICOM para el archivo: ./archivos/RX1011_34.jpg
+2024-09-26 12:49:36,648 - INFO - Archivo JPG abierto exitosamente: ./archivos/RX1011_34.jpg
+2024-09-26 12:49:36,795 - INFO - Imagen convertida a escala de grises
+2024-09-26 12:49:36,991 - INFO - Imagen redimensionada a 4096x4096
+2024-09-26 12:49:37,030 - INFO - Conversión completada exitosamente. Archivo DICOM guardado en: ./archivos/RX1011_34.dcm
