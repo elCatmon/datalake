@@ -7,14 +7,17 @@ import (
 
 	"github.com/gorilla/handlers" // Importa el paquete de handlers
 	"github.com/gorilla/mux"
+
+	"webservice/Handlers"
+	"webservice/config"
 )
 
 func main() {
 	// Inicializar la base de datos y el cliente MongoDB
-	db := InitializeDatabase()
+	db := config.InitializeDatabase()
 	defer db.Close()
 
-	client, database, bucket := InitializeMongoDBClient()
+	client, database, bucket := config.InitializeMongoDBClient()
 	defer client.Disconnect(context.Background())
 
 	// Crear un enrutador y configurar rutas
@@ -22,38 +25,38 @@ func main() {
 
 	// Definir las rutas
 	r.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-		RegisterHandler(w, r, db)
+		Handlers.RegisterHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		LoginHandler(w, r, db)
+		Handlers.LoginHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/donacion", func(w http.ResponseWriter, r *http.Request) {
-		UploadHandler(w, r, bucket, database)
+		Handlers.UploadHandler(w, r, bucket, database)
 	}).Methods("POST")
 
 	r.HandleFunc("/image/{filename:[a-zA-Z0-9_\\-\\.]+}", func(w http.ResponseWriter, r *http.Request) {
-		ImageHandler(w, r, bucket)
+		Handlers.ImageHandler(w, r, bucket)
 	}).Methods("GET")
 
 	r.HandleFunc("/thumbnails", func(w http.ResponseWriter, r *http.Request) {
-		ThumbnailHandler(w, r, client.Database("bdmdm"))
+		Handlers.ThumbnailHandler(w, r, client.Database("bdmdm"))
 	}).Methods("GET")
 
 	// Ruta para importar archivos y datos
 	r.HandleFunc("/importar", func(w http.ResponseWriter, r *http.Request) {
-		handleImportar(w, r, bucket, database)
+		Handlers.ImportarHandler(w, r, bucket, database)
 	}).Methods("POST")
 
-	// Ruta para importar archivos y datos
+	// Ruta para generar diagnosticos de las imagenes
 	r.HandleFunc("/diagnosticos", func(w http.ResponseWriter, r *http.Request) {
-		CreateDiagnosticoHandler(w, r, database)
+		Handlers.CreateDiagnosticoHandler(w, r, database)
 	}).Methods("POST")
 
 	// Configuración de CORS usando handlers.CORS
 	corsHandler := handlers.CORS(
-		handlers.AllowedOrigins([]string{"*"}),                      // Permite solicitudes desde localhost:3000
+		handlers.AllowedOrigins([]string{"*"}),                      // Permite solicitudes desde cualquier ip
 		handlers.AllowedMethods([]string{"GET", "POST", "OPTIONS"}), // Permite los métodos necesarios
 		handlers.AllowedHeaders([]string{"Content-Type"}),           // Permite los headers necesarios
 	)(r)
