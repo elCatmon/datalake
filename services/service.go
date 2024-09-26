@@ -161,7 +161,7 @@ func CrearFiltro(w http.ResponseWriter, tipoEstudio string, region string, edadM
 }
 
 // Busca estudios aplicando el filtro
-func buscarEstudios(w http.ResponseWriter, studiesCollection *mongo.Collection, filter bson.M) ([]primitive.ObjectID, *mongo.Cursor, error) {
+func BuscarEstudios(w http.ResponseWriter, studiesCollection *mongo.Collection, filter bson.M) ([]primitive.ObjectID, *mongo.Cursor, error) {
 
 	// Buscar los estudios que cumplen con el filtro
 	cursor, err := studiesCollection.Find(context.Background(), filter)

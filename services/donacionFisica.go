@@ -17,7 +17,7 @@ import (
 )
 
 // Sube informacion de la donacion fisica anonimizada
-func subirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gridfs.Bucket, r *http.Request, database *mongo.Database) {
+func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gridfs.Bucket, r *http.Request, database *mongo.Database) {
 	estudioID, _ := datos[0].(string)
 	donador, _ := datos[1].(string)
 	estudio, _ := datos[2].(string)

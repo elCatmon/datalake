@@ -182,7 +182,7 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 		return
 	}
 
-	imageIDs, cursor, err := services.buscarEstudios(w, studiesCollection, filter)
+	imageIDs, cursor, err := services.BuscarEstudios(w, studiesCollection, filter)
 	if err != nil {
 		http.Error(w, "Error al buscar los estudios", http.StatusInternalServerError)
 		return
@@ -241,7 +241,7 @@ func ImportarHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Buck
 		http.Error(w, "Failed to parse form data", http.StatusBadRequest)
 	}
 	//Subir informacion e imagenes a mongo
-	services.subirDonacionFisica(datos, w, bucket, r, database)
+	services.SubirDonacionFisica(datos, w, bucket, r, database)
 
 	w.Header().Set("Content-Type", "application/json")
 	response := map[string]string{"message": "Data successfully inserted"}
