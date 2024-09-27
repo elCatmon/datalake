@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 	"webservice/config"
 	"webservice/models"
 
@@ -200,16 +201,24 @@ func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
 		}
 	}
 
+	// Log de creación de filtro
+	log.Printf("Creando filtro con tipoEstudio: %s, origen: %s, obtencion: %s, valido: %s, region: %s, proyeccion: %s, sexo: %s, edad: %s",
+		tipoEstudio, origen, obtencion, valido, region, proyeccion, sexo, edad)
+	log.Printf("Filtro creado: %+v", filter)
+
 	return filter, nil
 }
 
 // Busca estudios aplicando el filtro
 func BuscarEstudios(w http.ResponseWriter, studiesCollection *mongo.Collection, filter bson.M) ([]primitive.ObjectID, *mongo.Cursor, error) {
+	// Log de búsqueda
+	log.Printf("Buscando estudios con filtro: %+v", filter)
 
 	// Buscar los estudios que cumplen con el filtro
 	cursor, err := studiesCollection.Find(context.Background(), filter)
 	if err != nil {
 		http.Error(w, "Error al buscar estudios en la base de datos: "+err.Error(), http.StatusInternalServerError)
+		return nil, nil, err // Retornar error después de enviar la respuesta
 	}
 	defer cursor.Close(context.Background())
 
@@ -219,16 +228,29 @@ func BuscarEstudios(w http.ResponseWriter, studiesCollection *mongo.Collection, 
 		var study models.EstudioDocument
 		if err := cursor.Decode(&study); err != nil {
 			http.Error(w, "Error al decodificar estudio: "+err.Error(), http.StatusInternalServerError)
+			return nil, nil, err // Retornar error después de enviar la respuesta
 		}
 
 		for _, img := range study.Imagenes {
 			if img.Anonimizada {
+				if img.Imagen == "" {
+					log.Printf("ID de imagen vacío, se omite.")
+					continue // Ignorar este ID y continuar con el siguiente
+				}
+
+				if len(img.Imagen) != 24 {
+					log.Printf("ID de imagen no válido (longitud incorrecta): %s, se omite.", img.Imagen)
+					continue // Ignorar este ID y continuar con el siguiente
+				}
+
 				imageID, err := primitive.ObjectIDFromHex(img.Imagen)
 				if err != nil {
-					http.Error(w, "Error al convertir ID de imagen: "+err.Error(), http.StatusInternalServerError)
+					log.Printf("Error al convertir ID de imagen: %v", err) // Log del error
+					continue                                               // Ignorar este ID y continuar con el siguiente
 				}
 				imageIDs = append(imageIDs, imageID)
 			}
+
 		}
 	}
 
@@ -244,17 +266,24 @@ func BuscarImagenes(w http.ResponseWriter, imageIDs []primitive.ObjectID, db *mo
 		"_id":      bson.M{"$in": imageIDs},
 		"filename": bson.M{"$regex": `\.jpg$`},
 	}
+	// Log de búsqueda de imágenes
+	log.Printf("Buscando imágenes con filtro: %+v", filter)
+
 	// Buscar los archivos en la colección usando el filtro
 	cursor, err := imagesCollection.Find(context.Background(), filter)
 	if err != nil {
 		http.Error(w, "Error al buscar archivos en la base de datos: "+err.Error(), http.StatusInternalServerError)
+		return nil, err // Retornar error después de enviar la respuesta
 	}
 	defer cursor.Close(context.Background())
+
 	var images []string
 	for cursor.Next(context.Background()) {
 		var fileInfo models.FileDocument
 		if err := cursor.Decode(&fileInfo); err != nil {
 			http.Error(w, "Error al decodificar archivo: "+err.Error(), http.StatusInternalServerError)
+			log.Printf("Error al decodificar archivo: %v", err) // Log del error
+			return nil, err                                     // Retornar error después de enviar la respuesta
 		}
 		// Obtener el nombre del archivo y construir la URL
 		filename := fileInfo.Filename
@@ -518,4 +547,73 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 	w.Write([]byte("Todos los archivos han sido procesados exitosamente y el estudio ha sido registrado."))
 
 	return nil
+}
+
+// UpdateDiagnostico actualiza un diagnóstico en la base de datos.
+func UpdateDiagnostico(studyID string, diagnostico models.Diagnostico, db *mongo.Database) error {
+	// Convertir el studyID a ObjectID de MongoDB
+	objectID, err := primitive.ObjectIDFromHex(studyID)
+	if err != nil {
+		return fmt.Errorf("ID de estudio inválido: %v", err)
+	}
+
+	// Obtener la fecha y hora actual
+	fechaActual := time.Now()
+
+	// Crear el filtro para buscar el estudio por su ID
+	collection := db.Collection("estudios")
+	filter := bson.M{"_id": objectID}
+
+	// Actualizar los datos del diagnóstico en MongoDB
+	update := bson.M{
+		"$set": bson.M{
+			"diagnostico.hallazgos":     diagnostico.Hallazgos,
+			"diagnostico.impresion":     diagnostico.Impresion,
+			"diagnostico.observaciones": diagnostico.Observaciones,
+			"diagnostico.fecha_Emision": fechaActual, // Usar la fecha y hora actual
+			"diagnostico.realizo":       diagnostico.Medico,
+		},
+	}
+
+	// Ejecutar la actualización en MongoDB
+	result, err := collection.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("Error al actualizar el diagnóstico en la base de datos: %v", err)
+	}
+
+	if result.ModifiedCount == 0 {
+		return fmt.Errorf("No se encontró el estudio o no se actualizó el diagnóstico")
+	}
+
+	return nil
+}
+
+// FindEstudioIDByImagenNombre busca el _id del estudio que contiene una imagen por su nombre.
+func FindEstudioIDByImagenNombre(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
+	// Buscando la imagen en la colección de archivos
+	fileCollection := db.Collection("imagenes.files")
+	fileFilter := bson.M{"filename": imagenNombre}
+	var fileDoc models.FileDocument
+	err := fileCollection.FindOne(context.Background(), fileFilter).Decode(&fileDoc)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return primitive.ObjectID{}, fmt.Errorf("No se encontró la imagen con el nombre: %s", imagenNombre)
+		}
+		return primitive.ObjectID{}, fmt.Errorf("Error al buscar la imagen: %v", err)
+	}
+
+	// Buscando el estudio utilizando el ID de la imagen
+	studyCollection := db.Collection("estudios")
+	studyFilter := bson.M{"imagenes.dicom": fileDoc.ID.Hex()} // Asegúrate de que esto sea correcto
+
+	var estudio models.EstudioDocument
+	err = studyCollection.FindOne(context.Background(), studyFilter).Decode(&estudio)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return primitive.ObjectID{}, fmt.Errorf("No se encontró el estudio que contiene la imagen")
+		}
+		return primitive.ObjectID{}, fmt.Errorf("Error al buscar el estudio: %v", err)
+	}
+
+	return estudio.ID, nil
 }

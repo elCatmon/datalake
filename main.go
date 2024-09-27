@@ -51,9 +51,15 @@ func main() {
 	}).Methods("POST")
 
 	// Ruta para generar diagnosticos de las imagenes
-	r.HandleFunc("/diagnosticos", func(w http.ResponseWriter, r *http.Request) {
-		Handl.CreateDiagnosticoHandler(w, r, database)
-	}).Methods("POST")
+	r.HandleFunc("/diagnosticos/{id}", func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Request recibido en /diagnosticos/{id}")
+		Handl.UpdateDiagnosticoHandler(w, r, database)
+	}).Methods("PUT")
+
+	// Ruta para generar diagnosticos de las imagenes
+	r.HandleFunc("/estudios/dicom", func(w http.ResponseWriter, r *http.Request) {
+		Handl.FindEstudioIDByImagenNombreHandler(w, r, database)
+	}).Methods("GET")
 
 	// Aplicar el middleware de logging y CORS
 	r.Use(middleware.LoggingMiddleware) // Aplica LoggingMiddleware a todas las rutas

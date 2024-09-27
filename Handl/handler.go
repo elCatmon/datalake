@@ -1,8 +1,10 @@
 package Handl
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 
 	"io"
 	"log"
@@ -13,6 +15,8 @@ import (
 	"webservice/services"
 
 	"github.com/gorilla/mux"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/gridfs"
 	"golang.org/x/crypto/bcrypt"
@@ -150,7 +154,6 @@ func ImageHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket)
 	w.Write(data)
 }
 
-// ThumbnailHandler maneja la solicitud para obtener las miniaturas de imágenes JPG.
 func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 	// Obtener la colección de estudios
 	studiesCollection := db.Collection("estudios")
@@ -161,10 +164,14 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	// Parámetros de paginación
 	pageStr := queryParams.Get("page")
 	limitStr := queryParams.Get("limit")
+
+	// Parsear parámetros de página
 	page, err := strconv.Atoi(pageStr)
 	if err != nil || page < 1 {
 		page = 1 // Página por defecto si el parámetro es inválido
 	}
+
+	// Parsear parámetros de límite
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit < 1 {
 		limit = 18 // Límite por defecto si el parámetro es inválido
@@ -173,24 +180,21 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	// Crear filtro para los estudios
 	filter, err := services.CrearFiltro(w, r)
 	if err != nil {
-		http.Error(w, "Error al crear el filtro", http.StatusInternalServerError)
+		http.Error(w, "Error al crear el filtro: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Buscar estudios
 	imageIDs, cursor, err := services.BuscarEstudios(w, studiesCollection, filter)
 	if err != nil {
-		http.Error(w, "Error al buscar los estudios", http.StatusInternalServerError)
-		return
+		return // Al hacer http.Error, simplemente retornamos
 	}
+	defer cursor.Close(context.Background()) // Cerrar el cursor después de su uso
 
-	if err := cursor.Err(); err != nil {
-		http.Error(w, "Error al iterar sobre los estudios: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
+	// Si no hay IDs de imagen, devolver una lista vacía
 	if len(imageIDs) == 0 {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]string{})
+		json.NewEncoder(w).Encode([]string{}) // No es necesario usar http.Error aquí
 		return
 	}
 
@@ -198,9 +202,8 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	start := (page - 1) * limit
 	end := start + limit
 	if start >= len(imageIDs) {
-		// Si la página solicitada está fuera del rango de IDs disponibles
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]string{})
+		json.NewEncoder(w).Encode([]string{}) // No es necesario usar http.Error aquí
 		return
 	}
 	if end > len(imageIDs) {
@@ -208,15 +211,17 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	}
 	paginatedImageIDs := imageIDs[start:end]
 
+	// Buscar imágenes
 	images, err := services.BuscarImagenes(w, paginatedImageIDs, db)
 	if err != nil {
-		http.Error(w, "Error al buscar imágenes", http.StatusInternalServerError)
-		return
+		return // Al hacer http.Error, simplemente retornamos
 	}
 
 	// Devolver la lista de URLs de las miniaturas
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(images)
+	if err := json.NewEncoder(w).Encode(images); err != nil {
+		http.Error(w, "Error al escribir la respuesta: "+err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func ImportarHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket, database *mongo.Database) {
@@ -243,16 +248,58 @@ func ImportarHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Buck
 	json.NewEncoder(w).Encode(response)
 }
 
-// CreateDiagnosticoHandler maneja la solicitud para crear un diagnóstico
-func CreateDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
-	var diagnostico models.Diagnostico
-	err := json.NewDecoder(r.Body).Decode(&diagnostico)
+// UpdateDiagnosticoHandler maneja la actualización de un diagnóstico existente.
+func UpdateDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+	vars := mux.Vars(r)
+	studyID := vars["id"]
+	fmt.Println("ID del estudio recibido:", studyID)
+
+	var requestBody struct {
+		Diagnostico models.Diagnostico `json:"diagnostico"`
+	}
+
+	err := json.NewDecoder(r.Body).Decode(&requestBody)
 	if err != nil {
-		http.Error(w, "Error en la solicitud: "+err.Error(), http.StatusBadRequest)
-		log.Printf("Error al decodificar el diagnóstico: %s", err.Error())
+		fmt.Println("Error al decodificar los datos del diagnóstico:", err)
+		http.Error(w, "Error al decodificar los datos del diagnóstico", http.StatusBadRequest)
+		return
+	}
+	fmt.Println("Datos del diagnóstico recibidos:", requestBody.Diagnostico)
+
+	// Llamar al servicio para actualizar el diagnóstico
+	err = services.UpdateDiagnostico(studyID, requestBody.Diagnostico, db)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode("Diagnóstico guardado exitosamente")
+	fmt.Println("Diagnóstico actualizado exitosamente")
+	json.NewEncoder(w).Encode(bson.M{"message": "Diagnóstico actualizado exitosamente"})
+}
+
+// FindEstudioIDByImagenNombreHandler maneja la búsqueda del _id del estudio que contiene una imagen por su nombre.
+func FindEstudioIDByImagenNombreHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+	imagenNombre := r.URL.Query().Get("nombre")
+	if imagenNombre == "" {
+		http.Error(w, "El nombre de la imagen es requerido", http.StatusBadRequest)
+		log.Println("Error: El nombre de la imagen es requerido")
+		return
+	}
+
+	log.Printf("Buscando imagen con nombre: %s\n", imagenNombre)
+
+	estudioID, err := services.FindEstudioIDByImagenNombre(imagenNombre, db)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Retornar el _id del estudio como respuesta JSON
+	response := struct {
+		EstudioID primitive.ObjectID `json:"estudio_id"`
+	}{EstudioID: estudioID}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+	log.Printf("Retornando estudio ID: %s\n", estudioID.Hex())
 }
