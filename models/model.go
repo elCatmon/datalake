@@ -31,19 +31,19 @@ type Imagen struct {
 }
 
 type Diagnostico struct {
-	Hallazgos     string `bson:"hallazgos"`
-	Impresion     string `bson:"impresion"`
-	Observaciones string `bson:"observaciones"`
+	Hallazgos     string    `bson:"hallazgos"`
+	Impresion     string    `bson:"impresion"`
+	Observaciones string    `bson:"observaciones"`
+	Fecha         time.Time `bson:"fecha_Emision"`
+	Medico        string    `bson:"realizo"`
 }
 
 type EstudioDocument struct {
-	ID              primitive.ObjectID `bson:"_id,omitempty"`
-	EstudioID       string             `bson:"estudio_ID"`
-	Donador         string             `bson:"donador"`
-	Hash            string             `bson:"hash"`
-	Status          int                `bson:"status"`
-	FechaNacimiento time.Time          `bson:"fecha_nacimiento"`
-	FechaEstudio    time.Time          `bson:"fecha_estudio"`
-	Imagenes        []Imagen           `bson:"imagenes"`
-	Diagnostico     []Diagnostico      `bson:"diagnostico"`
+	ID          primitive.ObjectID `bson:"_id,omitempty"`
+	EstudioID   string             `bson:"estudio_ID"`
+	Donador     string             `bson:"donador"`
+	Hash        string             `bson:"hash"`
+	Status      int                `bson:"status"`
+	Imagenes    []Imagen           `bson:"imagenes"`
+	Diagnostico []Diagnostico      `bson:"diagnostico"`
 }

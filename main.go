@@ -51,9 +51,16 @@ func main() {
 	}).Methods("POST")
 
 	// Ruta para generar diagnosticos de las imagenes
-	r.HandleFunc("/diagnosticos", func(w http.ResponseWriter, r *http.Request) {
-		Handl.CreateDiagnosticoHandler(w, r, database)
-	}).Methods("POST")
+	r.HandleFunc("/diagnosticos/{id}", func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Request recibido en /diagnosticos/{id}")
+		Handl.UpdateDiagnosticoHandler(w, r, database)
+	}).Methods("PUT")
+
+	// Ruta para generar diagnosticos de las imagenes
+	r.HandleFunc("/estudios/dicom", func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Request recibido en /estudios/dicom")
+		Handl.FindEstudioIDByImagenNombreHandler(w, r, database)
+	}).Methods("GET")
 
 	// Aplicar el middleware de logging y CORS
 	r.Use(middleware.LoggingMiddleware) // Aplica LoggingMiddleware a todas las rutas
@@ -61,9 +68,9 @@ func main() {
 
 	// Configuración de CORS usando handlers.CORS
 	corsHandler := handlers.CORS(
-		handlers.AllowedOrigins([]string{"*"}),                      // Permite solicitudes desde cualquier ip
-		handlers.AllowedMethods([]string{"GET", "POST", "OPTIONS"}), // Permite los métodos necesarios
-		handlers.AllowedHeaders([]string{"Content-Type"}),           // Permite los headers necesarios
+		handlers.AllowedOrigins([]string{"*"}),                             // Permite solicitudes desde cualquier ip
+		handlers.AllowedMethods([]string{"GET", "POST", "OPTIONS", "PUT"}), // Permite los métodos necesarios
+		handlers.AllowedHeaders([]string{"Content-Type"}),                  // Permite los headers necesarios
 	)(r)
 
 	// Iniciar el servidor
