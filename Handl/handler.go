@@ -258,6 +258,7 @@ func UpdateDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.
 		Diagnostico models.Diagnostico `json:"diagnostico"`
 	}
 
+	// Decodificar el cuerpo de la solicitud
 	err := json.NewDecoder(r.Body).Decode(&requestBody)
 	if err != nil {
 		fmt.Println("Error al decodificar los datos del diagnóstico:", err)
@@ -267,8 +268,10 @@ func UpdateDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.
 	fmt.Println("Datos del diagnóstico recibidos:", requestBody.Diagnostico)
 
 	// Llamar al servicio para actualizar el diagnóstico
+	fmt.Println("Intentando actualizar el diagnóstico en la base de datos...")
 	err = services.UpdateDiagnostico(studyID, requestBody.Diagnostico, db)
 	if err != nil {
+		fmt.Println("Error al actualizar el diagnóstico:", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

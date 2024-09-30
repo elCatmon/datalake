@@ -127,8 +127,6 @@ func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
 	valido := r.URL.Query().Get("valido")
 	region := r.URL.Query().Get("region")
 	proyeccion := r.URL.Query().Get("proyeccion")
-	sexo := r.URL.Query().Get("sexo")
-	edad := r.URL.Query().Get("edad")
 
 	// Crear el filtro de búsqueda para estudios con los filtros obligatorios
 	filter := bson.M{
@@ -187,23 +185,9 @@ func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
 		}
 	}
 
-	// Filtro por sexo (10mo dígito de la clave)
-	if sexo != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{9}" + sexo, // Filtra por sexo si está presente
-		}
-	}
-
-	// Filtro por edad (11mo dígito de la clave)
-	if edad != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{10}" + edad, // Filtra por edad si está presente
-		}
-	}
-
 	// Log de creación de filtro
-	log.Printf("Creando filtro con tipoEstudio: %s, origen: %s, obtencion: %s, valido: %s, region: %s, proyeccion: %s, sexo: %s, edad: %s",
-		tipoEstudio, origen, obtencion, valido, region, proyeccion, sexo, edad)
+	log.Printf("Creando filtro con tipoEstudio: %s, origen: %s, obtencion: %s, valido: %s, region: %s, proyeccion: %s",
+		tipoEstudio, origen, obtencion, valido, region, proyeccion)
 	log.Printf("Filtro creado: %+v", filter)
 
 	return filter, nil
@@ -549,7 +533,7 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 	return nil
 }
 
-// UpdateDiagnostico actualiza un diagnóstico en la base de datos.
+// UpdateDiagnostico agrega un nuevo diagnóstico a la lista en la base de datos.
 func UpdateDiagnostico(studyID string, diagnostico models.Diagnostico, db *mongo.Database) error {
 	// Convertir el studyID a ObjectID de MongoDB
 	objectID, err := primitive.ObjectIDFromHex(studyID)
@@ -560,29 +544,37 @@ func UpdateDiagnostico(studyID string, diagnostico models.Diagnostico, db *mongo
 	// Obtener la fecha y hora actual
 	fechaActual := time.Now()
 
+	// Asignar la fecha actual al diagnóstico
+	diagnostico.Fecha = fechaActual
+
 	// Crear el filtro para buscar el estudio por su ID
 	collection := db.Collection("estudios")
 	filter := bson.M{"_id": objectID}
 
-	// Actualizar los datos del diagnóstico en MongoDB
+	// Estructura del nuevo diagnóstico que será añadido al array
+	nuevoDiagnostico := bson.M{
+		"hallazgos":     diagnostico.Hallazgos,
+		"impresion":     diagnostico.Impresion,
+		"observaciones": diagnostico.Observaciones,
+		"fecha_Emision": diagnostico.Fecha, // Usar la fecha actual
+		"realizo":       diagnostico.Medico,
+	}
+
+	// Operación de actualización para agregar el nuevo diagnóstico al array
 	update := bson.M{
-		"$set": bson.M{
-			"diagnostico.hallazgos":     diagnostico.Hallazgos,
-			"diagnostico.impresion":     diagnostico.Impresion,
-			"diagnostico.observaciones": diagnostico.Observaciones,
-			"diagnostico.fecha_Emision": fechaActual, // Usar la fecha y hora actual
-			"diagnostico.realizo":       diagnostico.Medico,
+		"$push": bson.M{
+			"diagnostico": nuevoDiagnostico, // Agregar al array "diagnostico"
 		},
 	}
 
 	// Ejecutar la actualización en MongoDB
 	result, err := collection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
-		return fmt.Errorf("Error al actualizar el diagnóstico en la base de datos: %v", err)
+		return fmt.Errorf("error al actualizar el diagnóstico en la base de datos: %v", err)
 	}
 
 	if result.ModifiedCount == 0 {
-		return fmt.Errorf("No se encontró el estudio o no se actualizó el diagnóstico")
+		return fmt.Errorf("no se encontró el estudio o no se actualizó el diagnóstico")
 	}
 
 	return nil
@@ -590,30 +582,45 @@ func UpdateDiagnostico(studyID string, diagnostico models.Diagnostico, db *mongo
 
 // FindEstudioIDByImagenNombre busca el _id del estudio que contiene una imagen por su nombre.
 func FindEstudioIDByImagenNombre(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
-	// Buscando la imagen en la colección de archivos
+	log.Println("Iniciando búsqueda del estudio para la imagen:", imagenNombre)
+
+	// Buscando la imagen en la colección de archivos (imagenes.files)
 	fileCollection := db.Collection("imagenes.files")
 	fileFilter := bson.M{"filename": imagenNombre}
 	var fileDoc models.FileDocument
+
+	log.Println("Buscando en la colección 'imagenes.files' con el filtro:", fileFilter)
 	err := fileCollection.FindOne(context.Background(), fileFilter).Decode(&fileDoc)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return primitive.ObjectID{}, fmt.Errorf("No se encontró la imagen con el nombre: %s", imagenNombre)
+			log.Printf("No se encontró la imagen con el nombre: %s", imagenNombre)
+			return primitive.ObjectID{}, fmt.Errorf("no se encontró la imagen con el nombre: %s", imagenNombre)
 		}
-		return primitive.ObjectID{}, fmt.Errorf("Error al buscar la imagen: %v", err)
+		log.Printf("Error al buscar la imagen: %v", err)
+		return primitive.ObjectID{}, fmt.Errorf("error al buscar la imagen: %v", err)
 	}
 
-	// Buscando el estudio utilizando el ID de la imagen
-	studyCollection := db.Collection("estudios")
-	studyFilter := bson.M{"imagenes.dicom": fileDoc.ID.Hex()} // Asegúrate de que esto sea correcto
+	log.Println("Imagen encontrada en 'imagenes.files':", fileDoc)
 
+	// Buscando el estudio utilizando el ID de la imagen (como cadena de texto)
+	studyCollection := db.Collection("estudios")
+	studyFilter := bson.M{"imagenes.dicom": fileDoc.ID.Hex()} // Convertir el ObjectID a su representación hexadecimal (cadena)
+
+	log.Println("Buscando en la colección 'estudios' con el filtro:", studyFilter)
 	var estudio models.EstudioDocument
 	err = studyCollection.FindOne(context.Background(), studyFilter).Decode(&estudio)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return primitive.ObjectID{}, fmt.Errorf("No se encontró el estudio que contiene la imagen")
+			log.Printf("No se encontró el estudio que contiene la imagen con ID: %v", fileDoc.ID)
+			return primitive.ObjectID{}, fmt.Errorf("no se encontró el estudio que contiene la imagen")
 		}
-		return primitive.ObjectID{}, fmt.Errorf("Error al buscar el estudio: %v", err)
+		log.Printf("Error al buscar el estudio: %v", err)
+		return primitive.ObjectID{}, fmt.Errorf("error al buscar el estudio: %v", err)
 	}
 
+	log.Println("Estudio encontrado:", estudio)
+
+	// Devolver el ID del estudio encontrado
+	log.Println("Devolviendo el ID del estudio:", estudio.ID)
 	return estudio.ID, nil
 }

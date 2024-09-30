@@ -58,6 +58,7 @@ func main() {
 
 	// Ruta para generar diagnosticos de las imagenes
 	r.HandleFunc("/estudios/dicom", func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Request recibido en /estudios/dicom")
 		Handl.FindEstudioIDByImagenNombreHandler(w, r, database)
 	}).Methods("GET")
 
@@ -67,9 +68,9 @@ func main() {
 
 	// Configuración de CORS usando handlers.CORS
 	corsHandler := handlers.CORS(
-		handlers.AllowedOrigins([]string{"*"}),                      // Permite solicitudes desde cualquier ip
-		handlers.AllowedMethods([]string{"GET", "POST", "OPTIONS"}), // Permite los métodos necesarios
-		handlers.AllowedHeaders([]string{"Content-Type"}),           // Permite los headers necesarios
+		handlers.AllowedOrigins([]string{"*"}),                             // Permite solicitudes desde cualquier ip
+		handlers.AllowedMethods([]string{"GET", "POST", "OPTIONS", "PUT"}), // Permite los métodos necesarios
+		handlers.AllowedHeaders([]string{"Content-Type"}),                  // Permite los headers necesarios
 	)(r)
 
 	// Iniciar el servidor
