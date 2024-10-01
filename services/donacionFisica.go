@@ -35,7 +35,7 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 	log.Printf("EstudioID: %s, Donador: %s, Estudio: %s, Sexo: %s, Edad: %s, Archivos Anonimizados: %v, Archivos Originales: %v", estudioID, donador, estudio, sexo, edad, anonymizedFiles, originalFiles)
 
 	// Clave única del estudio
-	clave := estudio + "0" + "1" + valida + region + "00" + "0" + "0"
+	clave := estudio + region + "00" + valida + "0" + "1" + "0" + "0"
 	log.Printf("Clave generada: %s", clave)
 
 	if len(originalFiles) == 0 || len(anonymizedFiles) == 0 {

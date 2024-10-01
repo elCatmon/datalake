@@ -149,39 +149,17 @@ func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
 	}
 
 	// Filtros opcionales
-
-	// Filtro por origen (3er dígito de la clave)
-	if origen != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{2}" + origen, // Filtra por origen si está presente
-		}
-	}
-
-	// Filtro por obtención (4to dígito de la clave)
-	if obtencion != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{3}" + obtencion, // Filtra por obtención si está presente
-		}
-	}
-
-	// Filtro por si es válida (5to dígito de la clave)
-	if valido != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{4}" + valido, // Filtra por validez si está presente
-		}
-	}
-
-	// Filtro por región (6to y 7mo dígito de la clave)
+	// Filtro por región (3to y 7mo dígito de la clave)
 	if region != "" {
 		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{5}" + region, // Filtra por región si está presente
+			"$regex": "^.{1}" + region, // Filtra por región si está presente
 		}
 	}
 
 	// Filtro por proyección (8vo y 9no dígito de la clave)
 	if proyeccion != "" {
 		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{7}" + proyeccion, // Filtra por proyección si está presente
+			"$regex": "^.{3}" + proyeccion, // Filtra por proyección si está presente
 		}
 	}
 
@@ -435,7 +413,7 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 		return err
 	}
 	hash := GenerateHash(donador, estudio)
-	clave := estudio + "0" + "2" + "0" + "00" + "00" + "0" + "0"
+	clave := estudio + "00" + "00" + "0" + "0" + "1" + "0" + "0"
 	log.Printf("Generando documento de estudio con ID: %s", estudioID)
 
 	// Subir archivos originales a GridFS y crear el documento del estudio
