@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"io"
 	"log"
@@ -248,8 +249,7 @@ func ImportarHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Buck
 	json.NewEncoder(w).Encode(response)
 }
 
-// UpdateDiagnosticoHandler maneja la actualización de un diagnóstico existente.
-func UpdateDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+func ActualizarDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 	vars := mux.Vars(r)
 	studyID := vars["id"]
 	fmt.Println("ID del estudio recibido:", studyID)
@@ -257,6 +257,7 @@ func UpdateDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.
 	var requestBody struct {
 		Diagnostico models.Diagnostico `json:"diagnostico"`
 	}
+	requestBody.Diagnostico.Fecha = time.Now() // Asignar la fecha actual si no se proporciona
 
 	// Decodificar el cuerpo de la solicitud
 	err := json.NewDecoder(r.Body).Decode(&requestBody)
@@ -265,11 +266,12 @@ func UpdateDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.
 		http.Error(w, "Error al decodificar los datos del diagnóstico", http.StatusBadRequest)
 		return
 	}
+
 	fmt.Println("Datos del diagnóstico recibidos:", requestBody.Diagnostico)
 
 	// Llamar al servicio para actualizar el diagnóstico
 	fmt.Println("Intentando actualizar el diagnóstico en la base de datos...")
-	err = services.UpdateDiagnostico(studyID, requestBody.Diagnostico, db)
+	err = services.ActualizarDiagnostico(studyID, requestBody.Diagnostico, db)
 	if err != nil {
 		fmt.Println("Error al actualizar el diagnóstico:", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -281,7 +283,7 @@ func UpdateDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.
 }
 
 // FindEstudioIDByImagenNombreHandler maneja la búsqueda del _id del estudio que contiene una imagen por su nombre.
-func FindEstudioIDByImagenNombreHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+func BuscarEstudioIDImagenNombreHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 	imagenNombre := r.URL.Query().Get("nombre")
 	if imagenNombre == "" {
 		http.Error(w, "El nombre de la imagen es requerido", http.StatusBadRequest)
@@ -291,7 +293,7 @@ func FindEstudioIDByImagenNombreHandler(w http.ResponseWriter, r *http.Request, 
 
 	log.Printf("Buscando imagen con nombre: %s\n", imagenNombre)
 
-	estudioID, err := services.FindEstudioIDByImagenNombre(imagenNombre, db)
+	estudioID, err := services.BuscarEstudioIDImagenNombre(imagenNombre, db)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -305,4 +307,33 @@ func FindEstudioIDByImagenNombreHandler(w http.ResponseWriter, r *http.Request, 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 	log.Printf("Retornando estudio ID: %s\n", estudioID.Hex())
+}
+
+// GetDiagnosticoReciente maneja la solicitud HTTP para obtener el diagnóstico más reciente
+func GetDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+	// Obtener el ID desde los parámetros de la URL
+	idParam := r.URL.Query().Get("id")
+	if idParam == "" {
+		http.Error(w, "Falta el parámetro 'id'", http.StatusBadRequest)
+		return
+	}
+
+	// Convertir el id a ObjectID
+	id, err := primitive.ObjectIDFromHex(idParam)
+	if err != nil {
+		http.Error(w, "ID inválido", http.StatusBadRequest)
+		return
+	}
+
+	// Llamar al servicio para buscar el diagnóstico más reciente
+	ctx := r.Context()
+	diagnosticoReciente, err := services.BuscarDiagnosticoReciente(ctx, db, id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Responder con el diagnóstico más reciente en formato JSON
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(diagnosticoReciente)
 }

@@ -148,7 +148,7 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 		EstudioID: estudioID,
 		Donador:   donador,
 		Hash:      hash,
-		Status:    0,
+		Status:    1,
 		Imagenes:  imagenes,
 		Diagnostico: []models.Diagnostico{
 			{
