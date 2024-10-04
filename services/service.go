@@ -149,39 +149,17 @@ func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
 	}
 
 	// Filtros opcionales
-
-	// Filtro por origen (3er dígito de la clave)
-	if origen != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{2}" + origen, // Filtra por origen si está presente
-		}
-	}
-
-	// Filtro por obtención (4to dígito de la clave)
-	if obtencion != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{3}" + obtencion, // Filtra por obtención si está presente
-		}
-	}
-
-	// Filtro por si es válida (5to dígito de la clave)
-	if valido != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{4}" + valido, // Filtra por validez si está presente
-		}
-	}
-
-	// Filtro por región (6to y 7mo dígito de la clave)
+	// Filtro por región (3to y 7mo dígito de la clave)
 	if region != "" {
 		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{5}" + region, // Filtra por región si está presente
+			"$regex": "^.{1}" + region, // Filtra por región si está presente
 		}
 	}
 
 	// Filtro por proyección (8vo y 9no dígito de la clave)
 	if proyeccion != "" {
 		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{7}" + proyeccion, // Filtra por proyección si está presente
+			"$regex": "^.{3}" + proyeccion, // Filtra por proyección si está presente
 		}
 	}
 
@@ -435,7 +413,7 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 		return err
 	}
 	hash := GenerateHash(donador, estudio)
-	clave := estudio + "0" + "2" + "0" + "00" + "00" + "0" + "0"
+	clave := estudio + "00" + "00" + "0" + "0" + "1" + "0" + "0"
 	log.Printf("Generando documento de estudio con ID: %s", estudioID)
 
 	// Subir archivos originales a GridFS y crear el documento del estudio
@@ -534,7 +512,7 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 }
 
 // UpdateDiagnostico agrega un nuevo diagnóstico a la lista en la base de datos.
-func UpdateDiagnostico(studyID string, diagnostico models.Diagnostico, db *mongo.Database) error {
+func ActualizarDiagnostico(studyID string, diagnostico models.Diagnostico, db *mongo.Database) error {
 	// Convertir el studyID a ObjectID de MongoDB
 	objectID, err := primitive.ObjectIDFromHex(studyID)
 	if err != nil {
@@ -546,6 +524,7 @@ func UpdateDiagnostico(studyID string, diagnostico models.Diagnostico, db *mongo
 
 	// Asignar la fecha actual al diagnóstico
 	diagnostico.Fecha = fechaActual
+	log.Printf("Fecha antes de guardar: %v", diagnostico.Fecha)
 
 	// Crear el filtro para buscar el estudio por su ID
 	collection := db.Collection("estudios")
@@ -580,8 +559,9 @@ func UpdateDiagnostico(studyID string, diagnostico models.Diagnostico, db *mongo
 	return nil
 }
 
-// FindEstudioIDByImagenNombre busca el _id del estudio que contiene una imagen por su nombre.
-func FindEstudioIDByImagenNombre(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
+// BuscarEstudioIDImagenNombre busca el _id del estudio que contiene una imagen por su nombre.
+func BuscarEstudioIDImagenNombre(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
+
 	log.Println("Iniciando búsqueda del estudio para la imagen:", imagenNombre)
 
 	// Buscando la imagen en la colección de archivos (imagenes.files)
@@ -623,4 +603,36 @@ func FindEstudioIDByImagenNombre(imagenNombre string, db *mongo.Database) (primi
 	// Devolver el ID del estudio encontrado
 	log.Println("Devolviendo el ID del estudio:", estudio.ID)
 	return estudio.ID, nil
+}
+
+// BuscarDiagnosticoReciente busca el diagnóstico más reciente de un estudio dado su _id
+func BuscarDiagnosticoReciente(ctx context.Context, db *mongo.Database, id primitive.ObjectID) (*models.Diagnostico, error) {
+	// Definir la colección
+	collection := db.Collection("estudios")
+
+	// Buscar el documento por _id
+	var estudio models.EstudioDocument
+	filter := bson.M{"_id": id}
+	err := collection.FindOne(ctx, filter).Decode(&estudio)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, errors.New("no se encontró el documento con el ID proporcionado")
+		}
+		return nil, err
+	}
+
+	// Si no tiene diagnósticos, regresar un error
+	if len(estudio.Diagnostico) == 0 {
+		return nil, errors.New("el estudio no tiene diagnósticos")
+	}
+
+	// Encontrar el diagnóstico más reciente
+	var diagnosticoReciente models.Diagnostico
+	for _, diag := range estudio.Diagnostico {
+		if diag.Fecha.After(diagnosticoReciente.Fecha) {
+			diagnosticoReciente = diag
+		}
+	}
+
+	return &diagnosticoReciente, nil
 }
