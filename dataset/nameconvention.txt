@@ -54,3 +54,4 @@ Desglose del nombre:
     5 - Adulto joven (19 a 26 años)
     6 - Adulto (27 a 59 años)
     7 - Adulto mayor (60 años y mas)
+- Caracter 12 - 16: identificador secuencial

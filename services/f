@@ -1,65 +1,236 @@
-quiero ajustar los siguientes filtros para que busquen en una clave como esta 01010020600, donde los primeros 2 valores corresponden al tipo de estudio, el 3er valor al origen, el 4to a la obtencion, 5to si es valida, 6to y 7mo a la region, 8vo y 9no a la proyeccion, 10mo al sexo y el ultimo a la edad, esta es la estructura de los documentos
-// FileDocument representa un documento en la colección `imagenes.files`.
-type FileDocument struct {
-	ID         primitive.ObjectID `bson:"_id"`
-	Filename   string             `bson:"filename"`
-	Length     int64              `bson:"length"`
-	ChunkSize  int                `bson:"chunkSize"`
-	UploadDate time.Time          `bson:"uploadDate"`
+func ActualizarDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+	vars := mux.Vars(r)
+	studyID := vars["id"]
+
+	fmt.Println("ID del estudio recibido:", studyID)
+
+	var requestBody struct {
+		ImagenNombre string             `json:"imagenNombre"` // Cambia la estructura para incluir imagenNombre
+		Clave        string             `json:"clave"`        // Cambia la estructura para incluir clave
+		Diagnostico  models.Diagnostico `json:"diagnostico"`
+	}
+
+	// Decodificar el cuerpo de la solicitud
+	err := json.NewDecoder(r.Body).Decode(&requestBody)
+	if err != nil {
+		fmt.Println("Error al decodificar los datos del diagnóstico:", err)
+		http.Error(w, "Error al decodificar los datos del diagnóstico", http.StatusBadRequest)
+		return
+	}
+
+	// Asignar la fecha actual si no se proporciona
+	requestBody.Diagnostico.Fecha = time.Now()
+
+	// Obtener el nombre de la imagen y la nueva clave
+	imagenNombre := requestBody.ImagenNombre
+	nuevaClave := requestBody.Clave
+
+	fmt.Println("Nombre de la imagen recibido:", imagenNombre)
+	fmt.Println("Nueva clave recibida:", nuevaClave)
+	fmt.Println("Datos del diagnóstico recibidos:", requestBody.Diagnostico)
+
+	// Llamar al servicio para actualizar el diagnóstico y la clave de la imagen
+	fmt.Println("Intentando actualizar el diagnóstico en la base de datos...")
+	err = services.ActualizarDiagnosticoYClave(studyID, imagenNombre, requestBody.Diagnostico, nuevaClave, db)
+	if err != nil {
+		fmt.Println("Error al actualizar el diagnóstico:", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Println("Diagnóstico actualizado exitosamente")
+	json.NewEncoder(w).Encode(bson.M{"message": "Diagnóstico actualizado exitosamente"})
 }
 
-type Imagen struct {
-	Clave       string `bson:"clave"`
-	Dicom       string `bson:"dicom"`
-	Imagen      string `bson:"imagen"`
-	Anonimizada bool   `bson:"anonimizada"`
+// FindEstudioIDByImagenNombreHandler maneja la búsqueda del _id del estudio que contiene una imagen por su nombre.
+func BuscarEstudioIDImagenNombreHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+	imagenNombre := r.URL.Query().Get("nombre")
+	if imagenNombre == "" {
+		http.Error(w, "El nombre de la imagen es requerido", http.StatusBadRequest)
+		log.Println("Error: El nombre de la imagen es requerido")
+		return
+	}
+
+	log.Printf("Buscando imagen con nombre: %s\n", imagenNombre)
+
+	estudioID, err := services.BuscarEstudioIDImagenNombre(imagenNombre, db)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Retornar el _id del estudio como respuesta JSON
+	response := struct {
+		EstudioID primitive.ObjectID `json:"estudio_id"`
+	}{EstudioID: estudioID}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+	log.Printf("Retornando estudio ID: %s\n", estudioID.Hex())
 }
 
-type Diagnostico struct {
-	Hallazgos     string `bson:"hallazgos"`
-	Impresion     string `bson:"impresion"`
-	Observaciones string `bson:"observaciones"`
+// GetDiagnosticoHandler maneja la solicitud HTTP para obtener el diagnóstico más reciente
+func GetDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+	// Obtener el ID desde los parámetros de la URL
+	idParam := r.URL.Query().Get("id")
+	if idParam == "" {
+		http.Error(w, "Falta el parámetro 'id'", http.StatusBadRequest)
+		return
+	}
+
+	// Convertir el id a ObjectID
+	id, err := primitive.ObjectIDFromHex(idParam)
+	if err != nil {
+		http.Error(w, "ID inválido", http.StatusBadRequest)
+		return
+	}
+
+	// Llamar al servicio para buscar el diagnóstico más reciente
+	ctx := r.Context()
+	diagnosticoReciente, err := services.BuscarDiagnosticoReciente(ctx, db, id)
+	if err != nil {
+		// Registrar el error en el servidor para diagnóstico
+		log.Printf("Error buscando diagnóstico: %v", err)
+		http.Error(w, "Error al obtener el diagnóstico", http.StatusInternalServerError)
+		return
+	}
+
+	// Responder con el diagnóstico más reciente en formato JSON
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(diagnosticoReciente); err != nil {
+		// Manejo de errores al codificar la respuesta JSON
+		log.Printf("Error al codificar la respuesta JSON: %v", err)
+		http.Error(w, "Error al procesar la respuesta", http.StatusInternalServerError)
+	}
 }
 
-type EstudioDocument struct {
-	ID              primitive.ObjectID `bson:"_id,omitempty"`
-	EstudioID       string             `bson:"estudio_ID"`
-	Donador         string             `bson:"donador"`
-	Hash            string             `bson:"hash"`
-	Status          int                `bson:"status"`
-	FechaNacimiento time.Time          `bson:"fecha_nacimiento"`
-	FechaEstudio    time.Time          `bson:"fecha_estudio"`
-	Imagenes        []Imagen           `bson:"imagenes"`
-	Diagnostico     []Diagnostico      `bson:"diagnostico"`
-}
-y este es el filtro
-// Crear filtro de busqueda de estudios
-func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
-	tipoEstudio := r.URL.Query().Get("tipoEstudio")
-	region := r.URL.Query().Get("region")
-	edad := r.URL.Query().Get("edad")
-	sexo := r.URL.Query().Get("sexo")
-	// Crear el filtro de búsqueda para estudios
+func ActualizarDiagnosticoYClave(studyID string, imagenNombre string, diagnostico models.Diagnostico, nuevaClave string, db *mongo.Database) error {
+	// Convertir el studyID a ObjectID de MongoDB
+	objectID, err := primitive.ObjectIDFromHex(studyID)
+	if err != nil {
+		return fmt.Errorf("ID de estudio inválido: %v", err)
+	}
+
+	// Obtener la fecha actual
+	fechaActual := time.Now()
+	diagnostico.Fecha = fechaActual
+
+	// Loguear información sobre el diagnóstico
+	log.Printf("Actualizando diagnóstico para estudio ID: %s, imagen nombre: %s", studyID, imagenNombre)
+
+	// Buscar el ID de la imagen a partir del nombre
+	imagenID, err := BuscarEstudioIDImagenNombre(imagenNombre, db)
+	if err != nil {
+		return fmt.Errorf("error al encontrar la imagen: %v", err)
+	}
+
+	// Crear el filtro para buscar el estudio por su ID y la imagen específica por su ID
+	collection := db.Collection("estudios")
 	filter := bson.M{
-		"imagenes": bson.M{
-			"$elemMatch": bson.M{
-				"anonimizada": true,
-			},
+		"_id":            objectID,
+		"imagenes.dicom": imagenID.Hex(), // Filtrar por el ID de la imagen
+	}
+
+	// Loguear el filtro que se está utilizando
+	log.Printf("Filtro de búsqueda: %v", filter)
+
+	// Crear el nuevo diagnóstico para agregar al array
+	nuevoDiagnostico := bson.M{
+		"hallazgos":     diagnostico.Hallazgos,
+		"impresion":     diagnostico.Impresion,
+		"observaciones": diagnostico.Observaciones,
+		"fecha_Emision": diagnostico.Fecha, // Usar la fecha actual
+		"realizo":       diagnostico.Medico,
+	}
+
+	// Loguear el nuevo diagnóstico que se va a agregar
+	log.Printf("Nuevo diagnóstico a agregar: %v", nuevoDiagnostico)
+
+	// Operación de actualización para agregar el diagnóstico al array y actualizar la clave solo en la imagen seleccionada
+	update := bson.M{
+		"$push": bson.M{
+			"diagnostico": nuevoDiagnostico, // Agregar el nuevo diagnóstico
 		},
-		"status": 1, // Asegúrate de que este valor corresponde a la estructura
+		"$set": bson.M{
+			"imagenes.$.clave": nuevaClave, // Actualizar la clave solo en la imagen seleccionada
+		},
 	}
 
-	// Filtro obligatorio para el tipo de estudio
-	filter["estudio_ID"] = tipoEstudio // Cambiar a estudio_ID
-	if region != "" {
-		filter["region"] = region // Ajustar según el campo en EstudioDocument
-	}
-	if sexo != "" {
-		filter["sexo"] = sexo // Asegúrate de que el campo 'sexo' esté en EstudioDocument
-	}
-	if edad != "" {
-		filter["edad"] = edad // Agregar filtro por edad
+	// Loguear la operación de actualización
+	log.Printf("Operación de actualización: %v", update)
+
+	// Ejecutar la actualización en MongoDB
+	result, err := collection.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return fmt.Errorf("error al actualizar el diagnóstico y la clave en la base de datos: %v", err)
 	}
 
-	return filter, nil
+	// Loguear el resultado de la operación
+	log.Printf("Resultado de la actualización: %+v", result)
+
+	if result.ModifiedCount == 0 {
+		return fmt.Errorf("no se encontró el estudio o no se actualizó el diagnóstico y la clave")
+	}
+
+	log.Println("Actualización completada exitosamente")
+	return nil
+}
+
+// BuscarEstudioIDImagenNombre busca el _id del estudio que contiene una imagen por su nombre.
+func BuscarEstudioIDImagenNombre(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
+
+	log.Println("Iniciando búsqueda del estudio para la imagen:", imagenNombre)
+
+	// Buscando la imagen en la colección de archivos (imagenes.files)
+	fileCollection := db.Collection("imagenes.files")
+	fileFilter := bson.M{"filename": imagenNombre}
+	var fileDoc models.FileDocument
+
+	log.Println("Buscando en la colección 'imagenes.files' con el filtro:", fileFilter)
+	err := fileCollection.FindOne(context.Background(), fileFilter).Decode(&fileDoc)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			log.Printf("No se encontró la imagen con el nombre: %s", imagenNombre)
+			return primitive.ObjectID{}, fmt.Errorf("no se encontró la imagen con el nombre: %s", imagenNombre)
+		}
+		log.Printf("Error al buscar la imagen: %v", err)
+		return primitive.ObjectID{}, fmt.Errorf("error al buscar la imagen: %v", err)
+	}
+
+	log.Println("Imagen encontrada en 'imagenes.files':", fileDoc)
+
+	// Devolver el ID de la imagen encontrada
+	return fileDoc.ID, nil
+}
+
+// BuscarDiagnosticoReciente busca el diagnóstico más reciente de un estudio dado su _id
+func BuscarDiagnosticoReciente(ctx context.Context, db *mongo.Database, id primitive.ObjectID) (*models.Diagnostico, error) {
+	// Definir la colección
+	collection := db.Collection("estudios")
+
+	// Buscar el documento por _id
+	var estudio models.EstudioDocument
+	filter := bson.M{"_id": id}
+	err := collection.FindOne(ctx, filter).Decode(&estudio)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, errors.New("no se encontró el documento con el ID proporcionado")
+		}
+		return nil, err
+	}
+
+	// Si no tiene diagnósticos, regresar un error
+	if len(estudio.Diagnostico) == 0 {
+		return nil, errors.New("el estudio no tiene diagnósticos")
+	}
+
+	// Encontrar el diagnóstico más reciente
+	var diagnosticoReciente models.Diagnostico
+	for _, diag := range estudio.Diagnostico {
+		if diag.Fecha.After(diagnosticoReciente.Fecha) {
+			diagnosticoReciente = diag
+		}
+	}
+
+	return &diagnosticoReciente, nil
 }

@@ -149,17 +149,17 @@ func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
 	}
 
 	// Filtros opcionales
-	// Filtro por región (3to y 7mo dígito de la clave)
+	// Filtro por región (3to y 4to dígito de la clave)
 	if region != "" {
 		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{1}" + region, // Filtra por región si está presente
+			"$regex": "^.{2}" + region, // Filtra por región si está presente
 		}
 	}
 
 	// Filtro por proyección (8vo y 9no dígito de la clave)
 	if proyeccion != "" {
 		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{3}" + proyeccion, // Filtra por proyección si está presente
+			"$regex": "^.{4}" + proyeccion, // Filtra por proyección si está presente
 		}
 	}
 
@@ -511,26 +511,37 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 	return nil
 }
 
-// UpdateDiagnostico agrega un nuevo diagnóstico a la lista en la base de datos.
-func ActualizarDiagnostico(studyID string, diagnostico models.Diagnostico, db *mongo.Database) error {
+func ActualizarDiagnosticoYClave(studyID string, imagenNombre string, diagnostico models.Diagnostico, nuevaClave string, db *mongo.Database) error {
 	// Convertir el studyID a ObjectID de MongoDB
 	objectID, err := primitive.ObjectIDFromHex(studyID)
 	if err != nil {
 		return fmt.Errorf("ID de estudio inválido: %v", err)
 	}
 
-	// Obtener la fecha y hora actual
+	// Obtener la fecha actual
 	fechaActual := time.Now()
-
-	// Asignar la fecha actual al diagnóstico
 	diagnostico.Fecha = fechaActual
-	log.Printf("Fecha antes de guardar: %v", diagnostico.Fecha)
 
-	// Crear el filtro para buscar el estudio por su ID
+	// Loguear información sobre el diagnóstico
+	log.Printf("Actualizando diagnóstico para estudio ID: %s, imagen nombre: %s", studyID, imagenNombre)
+
+	// Buscar el ID de la imagen a partir del nombre
+	imagenID, err := BuscarImagenEstudioNombre(imagenNombre, db)
+	if err != nil {
+		return fmt.Errorf("error al encontrar la imagen: %v", err)
+	}
+
+	// Crear el filtro para buscar el estudio por su ID y la imagen específica por su ID
 	collection := db.Collection("estudios")
-	filter := bson.M{"_id": objectID}
+	filter := bson.M{
+		"_id":            objectID,
+		"imagenes.dicom": imagenID.Hex(), // Filtrar por el ID de la imagen
+	}
 
-	// Estructura del nuevo diagnóstico que será añadido al array
+	// Loguear el filtro que se está utilizando
+	log.Printf("Filtro de búsqueda: %v", filter)
+
+	// Crear el nuevo diagnóstico para agregar al array
 	nuevoDiagnostico := bson.M{
 		"hallazgos":     diagnostico.Hallazgos,
 		"impresion":     diagnostico.Impresion,
@@ -539,28 +550,41 @@ func ActualizarDiagnostico(studyID string, diagnostico models.Diagnostico, db *m
 		"realizo":       diagnostico.Medico,
 	}
 
-	// Operación de actualización para agregar el nuevo diagnóstico al array
+	// Loguear el nuevo diagnóstico que se va a agregar
+	log.Printf("Nuevo diagnóstico a agregar: %v", nuevoDiagnostico)
+
+	// Operación de actualización para agregar el diagnóstico al array y actualizar la clave solo en la imagen seleccionada
 	update := bson.M{
 		"$push": bson.M{
-			"diagnostico": nuevoDiagnostico, // Agregar al array "diagnostico"
+			"diagnostico": nuevoDiagnostico, // Agregar el nuevo diagnóstico
+		},
+		"$set": bson.M{
+			"imagenes.$.clave": nuevaClave, // Actualizar la clave solo en la imagen seleccionada
 		},
 	}
+
+	// Loguear la operación de actualización
+	log.Printf("Operación de actualización: %v", update)
 
 	// Ejecutar la actualización en MongoDB
 	result, err := collection.UpdateOne(context.Background(), filter, update)
 	if err != nil {
-		return fmt.Errorf("error al actualizar el diagnóstico en la base de datos: %v", err)
+		return fmt.Errorf("error al actualizar el diagnóstico y la clave en la base de datos: %v", err)
 	}
+
+	// Loguear el resultado de la operación
+	log.Printf("Resultado de la actualización: %+v", result)
 
 	if result.ModifiedCount == 0 {
-		return fmt.Errorf("no se encontró el estudio o no se actualizó el diagnóstico")
+		return fmt.Errorf("no se encontró el estudio o no se actualizó el diagnóstico y la clave")
 	}
 
+	log.Println("Actualización completada exitosamente")
 	return nil
 }
 
 // BuscarEstudioIDImagenNombre busca el _id del estudio que contiene una imagen por su nombre.
-func BuscarEstudioIDImagenNombre(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
+func BuscarEstudioIDImagen(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
 
 	log.Println("Iniciando búsqueda del estudio para la imagen:", imagenNombre)
 
@@ -603,6 +627,33 @@ func BuscarEstudioIDImagenNombre(imagenNombre string, db *mongo.Database) (primi
 	// Devolver el ID del estudio encontrado
 	log.Println("Devolviendo el ID del estudio:", estudio.ID)
 	return estudio.ID, nil
+}
+
+// BuscarEstudioIDImagenNombre busca el _id del estudio que contiene una imagen por su nombre.
+func BuscarImagenEstudioNombre(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
+
+	log.Println("Iniciando búsqueda del estudio para la imagen:", imagenNombre)
+
+	// Buscando la imagen en la colección de archivos (imagenes.files)
+	fileCollection := db.Collection("imagenes.files")
+	fileFilter := bson.M{"filename": imagenNombre}
+	var fileDoc models.FileDocument
+
+	log.Println("Buscando en la colección 'imagenes.files' con el filtro:", fileFilter)
+	err := fileCollection.FindOne(context.Background(), fileFilter).Decode(&fileDoc)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			log.Printf("No se encontró la imagen con el nombre: %s", imagenNombre)
+			return primitive.ObjectID{}, fmt.Errorf("no se encontró la imagen con el nombre: %s", imagenNombre)
+		}
+		log.Printf("Error al buscar la imagen: %v", err)
+		return primitive.ObjectID{}, fmt.Errorf("error al buscar la imagen: %v", err)
+	}
+
+	log.Println("Imagen encontrada en 'imagenes.files':", fileDoc)
+
+	// Devolver el ID de la imagen encontrada
+	return fileDoc.ID, nil
 }
 
 // BuscarDiagnosticoReciente busca el diagnóstico más reciente de un estudio dado su _id

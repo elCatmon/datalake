@@ -252,12 +252,14 @@ func ImportarHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Buck
 func ActualizarDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 	vars := mux.Vars(r)
 	studyID := vars["id"]
+
 	fmt.Println("ID del estudio recibido:", studyID)
 
 	var requestBody struct {
-		Diagnostico models.Diagnostico `json:"diagnostico"`
+		ImagenNombre string             `json:"imagenNombre"` // Cambia la estructura para incluir imagenNombre
+		Clave        string             `json:"clave"`        // Cambia la estructura para incluir clave
+		Diagnostico  models.Diagnostico `json:"diagnostico"`
 	}
-	requestBody.Diagnostico.Fecha = time.Now() // Asignar la fecha actual si no se proporciona
 
 	// Decodificar el cuerpo de la solicitud
 	err := json.NewDecoder(r.Body).Decode(&requestBody)
@@ -267,11 +269,20 @@ func ActualizarDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mo
 		return
 	}
 
+	// Asignar la fecha actual si no se proporciona
+	requestBody.Diagnostico.Fecha = time.Now()
+
+	// Obtener el nombre de la imagen y la nueva clave
+	imagenNombre := requestBody.ImagenNombre
+	nuevaClave := requestBody.Clave
+
+	fmt.Println("Nombre de la imagen recibido:", imagenNombre)
+	fmt.Println("Nueva clave recibida:", nuevaClave)
 	fmt.Println("Datos del diagnóstico recibidos:", requestBody.Diagnostico)
 
-	// Llamar al servicio para actualizar el diagnóstico
+	// Llamar al servicio para actualizar el diagnóstico y la clave de la imagen
 	fmt.Println("Intentando actualizar el diagnóstico en la base de datos...")
-	err = services.ActualizarDiagnostico(studyID, requestBody.Diagnostico, db)
+	err = services.ActualizarDiagnosticoYClave(studyID, imagenNombre, requestBody.Diagnostico, nuevaClave, db)
 	if err != nil {
 		fmt.Println("Error al actualizar el diagnóstico:", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -293,7 +304,7 @@ func BuscarEstudioIDImagenNombreHandler(w http.ResponseWriter, r *http.Request, 
 
 	log.Printf("Buscando imagen con nombre: %s\n", imagenNombre)
 
-	estudioID, err := services.BuscarEstudioIDImagenNombre(imagenNombre, db)
+	estudioID, err := services.BuscarEstudioIDImagen(imagenNombre, db)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
