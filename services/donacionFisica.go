@@ -35,7 +35,7 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 	log.Printf("EstudioID: %s, Donador: %s, Estudio: %s, Sexo: %s, Edad: %s, Archivos Anonimizados: %v, Archivos Originales: %v", estudioID, donador, estudio, sexo, edad, anonymizedFiles, originalFiles)
 
 	// Clave única del estudio
-	clave := estudio + region + "00" + valida + "0" + "1" + "0" + "0"
+	clave := estudio + region + "00" + valida + "0" + "1" + sexo + edad
 	log.Printf("Clave generada: %s", clave)
 
 	if len(originalFiles) == 0 || len(anonymizedFiles) == 0 {
@@ -46,7 +46,7 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 
 	var imagenes []models.Imagen
 
-	// Subir archivos originales
+	// Subir archivos anonimizados
 	for _, fileHeader := range anonymizedFiles {
 
 		log.Printf("Procesando archivo anonimizado: %s", fileHeader.Filename)
@@ -54,22 +54,30 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 		// Crear una ruta temporal para el archivo
 		tempFilePath := fmt.Sprintf("./archivos/%s", fileHeader.Filename)
 		NameWithoutExt := filepath.Base(tempFilePath[:len(tempFilePath)-len(filepath.Ext(tempFilePath))])
-		dcmFilePath := fmt.Sprintf("./archivos/%s.dcm", NameWithoutExt)
+
+		// Ruta para el archivo DICOM modificado
+		dcmFilePath := fmt.Sprintf("./archivos/%s_M.dcm", NameWithoutExt)
+
+		// Ruta para el archivo JPG modificado
+		jpgFilePath := fmt.Sprintf("./archivos/%s_M.jpg", NameWithoutExt)
+
+		log.Printf("Ruta del archivo DICOM modificado: %s", dcmFilePath)
+		log.Printf("Ruta del archivo JPG modificado: %s", jpgFilePath)
 
 		// Guardar el archivo temporalmente
-		if err := guardarArchivoTemporal(fileHeader, tempFilePath); err != nil {
+		if err := guardarArchivoTemporal(fileHeader, jpgFilePath); err != nil {
 			http.Error(w, "Error al guardar archivo temporal", http.StatusInternalServerError)
 			return
 		}
 
 		// Convertir el archivo a JPG (si es necesario)
-		if err := convertirArchivoJPG(tempFilePath, dcmFilePath); err != nil {
+		if err := convertirArchivoJPG(jpgFilePath, dcmFilePath); err != nil {
 			http.Error(w, "Error al convertir archivo a JPG", http.StatusInternalServerError)
 			return
 		}
 
 		// Subir archivo original a GridFS
-		fileID, err := subirArchivoCGridFS(tempFilePath, bucket)
+		fileID, err := subirArchivoCGridFS(jpgFilePath, bucket)
 		if err != nil {
 			http.Error(w, "Error al subir archivo anonimizado", http.StatusInternalServerError)
 			return

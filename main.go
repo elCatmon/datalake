@@ -56,13 +56,13 @@ func main() {
 		Handl.ActualizarDiagnosticoHandler(w, r, database)
 	}).Methods("PATCH")
 
-	// Ruta para generar diagnosticos de las imagenes
+	// Ruta para buscar el estudio de una imagen dicom
 	r.HandleFunc("/estudios/dicom", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("Request recibido en /estudios/dicom")
 		Handl.BuscarEstudioIDImagenNombreHandler(w, r, database)
 	}).Methods("GET")
 
-	// Ruta para generar diagnosticos de las imagenes
+	// Ruta para obtener el diagnostico de una imagen
 	r.HandleFunc("/estudios/diagnostico", func(w http.ResponseWriter, r *http.Request) {
 		log.Println("Request recibido en /estudios/diagnostico")
 		Handl.GetDiagnosticoHandler(w, r, database)

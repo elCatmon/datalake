@@ -345,6 +345,11 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 	var imagenes []models.Imagen
 	var anonymizedFiles []string
 	var jpgFiles []string
+	estudioID := primitive.NewObjectID().Hex()
+	donador := "DonadorEjemplo" // Valor ejemplo, reemplazar por el valor correcto
+	estudio, err := getValueOrError(r.MultipartForm.Value, "tipoEstudio")
+	clave := estudio + "00" + "00" + "0" + "0" + "1" + "0" + "0"
+	hash := GenerateHash(donador, estudio)
 
 	// Iterar sobre cada archivo enviado
 	for _, fileHeader := range files {
@@ -377,51 +382,39 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 			continue
 		}
 
-		// Anonimizar el archivo
-		fileNameWithoutExt := tempFilePath[:len(tempFilePath)-len(filepath.Ext(tempFilePath))]
-		log.Println(fileNameWithoutExt)
-		anonFilePath := fileNameWithoutExt + "_M.dcm"
-		log.Printf("Anonimizando archivo %s a %s", tempFilePath, anonFilePath)
-		err = anonimizarArchivo(tempFilePath, anonFilePath)
-		if err != nil {
-			log.Printf("Error al anonimizar el archivo %s: %v", tempFilePath, err)
-			http.Error(w, "Error al anonimizar el archivo", http.StatusInternalServerError)
-			continue
+		// Comprobar si el archivo es DICOM
+		if filepath.Ext(tempFilePath) == ".dcm" {
+			// Anonimizar el archivo
+			fileNameWithoutExt := tempFilePath[:len(tempFilePath)-len(filepath.Ext(tempFilePath))]
+			anonFilePath := fileNameWithoutExt + "_M.dcm"
+			log.Printf("Anonimizando archivo %s a %s", tempFilePath, anonFilePath)
+			err = anonimizarArchivo(tempFilePath, anonFilePath)
+			if err != nil {
+				log.Printf("Error al anonimizar el archivo %s: %v", tempFilePath, err)
+				http.Error(w, "Error al anonimizar el archivo", http.StatusInternalServerError)
+				continue
+			}
+
+			// Convertir el archivo DICOM anonimizado a JPG
+			jpgtempFilePath := fileNameWithoutExt + "_M.jpg"
+			log.Printf("Convirtiendo archivo anonimizado a JPG: %s", jpgtempFilePath)
+			err = convertirArchivo(anonFilePath, jpgtempFilePath)
+			if err != nil {
+				log.Printf("Error al convertir el archivo %s a JPG: %v", anonFilePath, err)
+				http.Error(w, "Error al convertir el archivo a JPG", http.StatusInternalServerError)
+				continue
+			}
+
+			// Guardar rutas de archivos anonimizados y JPG
+			anonymizedFiles = append(anonymizedFiles, anonFilePath)
+			jpgFiles = append(jpgFiles, jpgtempFilePath)
 		}
 
-		jpgPathWithoutExt := tempFilePath[:len(tempFilePath)-len(filepath.Ext(tempFilePath))]
-		jpgtempFilePath := jpgPathWithoutExt + ".jpg"
-		log.Println(fileNameWithoutExt)
-		err = convertirArchivo(anonFilePath, jpgtempFilePath)
-		if err != nil {
-			log.Printf("Error al convertir el archivo %s: %v", tempFilePath, err)
-			http.Error(w, "Error al convertir el archivo", http.StatusInternalServerError)
-			continue
-		}
-
-		// Guardar rutas de archivos anonimizados y JPG
-		anonymizedFiles = append(anonymizedFiles, anonFilePath)
-		jpgFiles = append(jpgFiles, jpgtempFilePath)
-	}
-
-	// Crear una clave única para los archivos
-	estudioID := primitive.NewObjectID().Hex()
-	donador := "DonadorEjemplo" // Valor ejemplo, reemplazar por el valor correcto
-	estudio, err := getValueOrError(r.MultipartForm.Value, "tipoEstudio")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return err
-	}
-	hash := GenerateHash(donador, estudio)
-	clave := estudio + "00" + "00" + "0" + "0" + "1" + "0" + "0"
-	log.Printf("Generando documento de estudio con ID: %s", estudioID)
-
-	// Subir archivos originales a GridFS y crear el documento del estudio
-	for _, fileHeader := range files {
-		log.Printf("Subiendo archivo original %s a GridFS", fileHeader.Filename)
-		fileID := subirArchivoDigitalGridFS("./archivos/"+fileHeader.Filename, bucket)
+		// Subir archivo (ya sea JPG o DICOM) a GridFS
+		log.Printf("Subiendo archivo %s a GridFS", fileHeader.Filename)
+		fileID := subirArchivoDigitalGridFS(tempFilePath, bucket)
 		if fileID == "" {
-			log.Printf("Fallo al subir el archivo original %s", fileHeader.Filename)
+			log.Printf("Fallo al subir el archivo %s", fileHeader.Filename)
 			http.Error(w, "Fallo al subir a la base de datos los archivos originales", http.StatusInternalServerError)
 			continue
 		}
@@ -464,10 +457,11 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 				Hallazgos:     "",
 				Impresion:     "",
 				Observaciones: "",
+				Fecha:         time.Now(),
+				Medico:        "",
 			},
 		},
 	}
-	log.Println("Insertando el documento de estudio en MongoDB")
 
 	// Insertar el documento en MongoDB
 	collection := database.Collection("estudios")
@@ -478,28 +472,12 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 		return err
 	}
 
-	for _, anonFilePath := range anonymizedFiles {
-		if err := os.Remove(anonFilePath); err != nil {
-			log.Printf("Error al eliminar el archivo temporal anonimizado %s: %v", anonFilePath, err)
+	// Eliminar archivos temporales
+	for _, path := range append(anonymizedFiles, jpgFiles...) {
+		if err := os.Remove(path); err != nil {
+			log.Printf("Error al eliminar el archivo temporal %s: %v", path, err)
 		} else {
-			log.Printf("Archivo temporal anonimizado %s eliminado exitosamente.", anonFilePath)
-		}
-	}
-
-	for _, jpgFilePath := range jpgFiles {
-		if err := os.Remove(jpgFilePath); err != nil {
-			log.Printf("Error al eliminar el archivo temporal JPG %s: %v", jpgFilePath, err)
-		} else {
-			log.Printf("Archivo temporal JPG %s eliminado exitosamente.", jpgFilePath)
-		}
-	}
-	// Eliminar archivos temporales después de subirlos
-	for _, fileHeader := range files {
-		tempFilePath := "./archivos/" + fileHeader.Filename
-		if err := os.Remove(tempFilePath); err != nil {
-			log.Printf("Error al eliminar el archivo temporal %s: %v", tempFilePath, err)
-		} else {
-			log.Printf("Archivo temporal %s eliminado exitosamente.", tempFilePath)
+			log.Printf("Archivo temporal %s eliminado exitosamente.", path)
 		}
 	}
 
