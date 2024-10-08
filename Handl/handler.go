@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 
@@ -26,22 +25,14 @@ import (
 // RegisterHandler maneja la solicitud de registro de un nuevo usuario.
 func RegisterHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	w.Header().Set("Content-Type", "application/json")
-
-	log.Println("Iniciando registro de usuario")
-
 	var newUser models.User
 	err := json.NewDecoder(r.Body).Decode(&newUser)
 	if err != nil {
-		log.Printf("Error al decodificar los datos: %v", err)
 		http.Error(w, `{"error": "Error al decodificar los datos"}`, http.StatusBadRequest)
 		return
 	}
-
-	log.Printf("Usuario recibido: %+v", newUser)
-
 	exists, err := services.ExisteCorreo(db, newUser.Correo)
 	if err != nil {
-		log.Printf("Error al verificar el correo: %v", err)
 		http.Error(w, `{"error": "Error al verificar el correo"}`, http.StatusInternalServerError)
 		return
 	}
@@ -55,17 +46,13 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newUser.Contrasena), bcrypt.DefaultCost)
 	if err != nil {
-		log.Printf("Error al encriptar la contraseña: %v", err)
 		http.Error(w, `{"error": "Error al encriptar la contraseña"}`, http.StatusInternalServerError)
 		return
 	}
 
 	newUser.Contrasena = string(hashedPassword)
-
-	log.Println("Registrando usuario en la base de datos")
 	err = services.RegistrarUsuario(db, newUser)
 	if err != nil {
-		log.Printf("Error al registrar usuario: %v", err)
 		http.Error(w, `{"error": "Error al registrar usuario"}`, http.StatusInternalServerError)
 		return
 	}
@@ -73,8 +60,6 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	response := map[string]string{"message": "Registro exitoso"}
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
-
-	log.Println("Registro exitoso")
 }
 
 // LoginHandler maneja la solicitud de inicio de sesión del usuario.
@@ -82,20 +67,17 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var credentials models.User
 	err := json.NewDecoder(r.Body).Decode(&credentials)
 	if err != nil {
-		log.Printf("Error al decodificar los datos: %v", err)
 		http.Error(w, `{"error": "Error al decodificar los datos"}`, http.StatusBadRequest)
 		return
 	}
 
 	isValid, id, authErr := services.ValidarUsuario(db, credentials.Correo, credentials.Contrasena)
 	if authErr != nil {
-		log.Printf("Error al validar usuario: %v", authErr)
 		http.Error(w, `{"error": "Error interno del servidor"}`, http.StatusInternalServerError)
 		return
 	}
 
 	if !isValid {
-		log.Printf("Intento de inicio de sesión fallido: correo o contraseña incorrectos para el correo %s", credentials.Correo)
 		http.Error(w, `{"error": "Correo o contraseña incorrectos"}`, http.StatusUnauthorized)
 		return
 	}
@@ -104,9 +86,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("Error al codificar la respuesta JSON: %v", err)
 	}
-	log.Printf("Inicio de sesión exitoso para el correo %s, ID de usuario: %s", credentials.Correo, id)
 }
 
 func UploadHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket, database *mongo.Database) {
@@ -115,13 +95,8 @@ func UploadHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket
 
 	// Si ocurrió un error en SubirDonacionDigital, no es necesario llamar a WriteHeader ni Write de nuevo
 	if err != nil {
-		log.Printf("Error durante la carga: %v", err)
 		return // La respuesta de error ya ha sido enviada dentro de SubirDonacionDigital
 	}
-
-	// Si todo salió bien, registrar la inserción exitosa
-	log.Println("Documento del estudio insertado exitosamente")
-
 	// Enviar la respuesta exitosa
 	w.WriteHeader(http.StatusOK) // Solo se llama aquí si todo fue exitoso
 	w.Write([]byte("Archivo cargado exitosamente"))
@@ -298,12 +273,8 @@ func BuscarEstudioIDImagenNombreHandler(w http.ResponseWriter, r *http.Request, 
 	imagenNombre := r.URL.Query().Get("nombre")
 	if imagenNombre == "" {
 		http.Error(w, "El nombre de la imagen es requerido", http.StatusBadRequest)
-		log.Println("Error: El nombre de la imagen es requerido")
 		return
 	}
-
-	log.Printf("Buscando imagen con nombre: %s\n", imagenNombre)
-
 	estudioID, err := services.BuscarEstudioIDImagen(imagenNombre, db)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -317,7 +288,6 @@ func BuscarEstudioIDImagenNombreHandler(w http.ResponseWriter, r *http.Request, 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
-	log.Printf("Retornando estudio ID: %s\n", estudioID.Hex())
 }
 
 // GetDiagnosticoReciente maneja la solicitud HTTP para obtener el diagnóstico más reciente

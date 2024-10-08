@@ -1,183 +1,6 @@
-func ActualizarDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
-	vars := mux.Vars(r)
-	studyID := vars["id"]
-
-	fmt.Println("ID del estudio recibido:", studyID)
-
-	var requestBody struct {
-		ImagenNombre string             `json:"imagenNombre"` // Cambia la estructura para incluir imagenNombre
-		Clave        string             `json:"clave"`        // Cambia la estructura para incluir clave
-		Diagnostico  models.Diagnostico `json:"diagnostico"`
-	}
-
-	// Decodificar el cuerpo de la solicitud
-	err := json.NewDecoder(r.Body).Decode(&requestBody)
-	if err != nil {
-		fmt.Println("Error al decodificar los datos del diagnóstico:", err)
-		http.Error(w, "Error al decodificar los datos del diagnóstico", http.StatusBadRequest)
-		return
-	}
-
-	// Asignar la fecha actual si no se proporciona
-	requestBody.Diagnostico.Fecha = time.Now()
-
-	// Obtener el nombre de la imagen y la nueva clave
-	imagenNombre := requestBody.ImagenNombre
-	nuevaClave := requestBody.Clave
-
-	fmt.Println("Nombre de la imagen recibido:", imagenNombre)
-	fmt.Println("Nueva clave recibida:", nuevaClave)
-	fmt.Println("Datos del diagnóstico recibidos:", requestBody.Diagnostico)
-
-	// Llamar al servicio para actualizar el diagnóstico y la clave de la imagen
-	fmt.Println("Intentando actualizar el diagnóstico en la base de datos...")
-	err = services.ActualizarDiagnosticoYClave(studyID, imagenNombre, requestBody.Diagnostico, nuevaClave, db)
-	if err != nil {
-		fmt.Println("Error al actualizar el diagnóstico:", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	fmt.Println("Diagnóstico actualizado exitosamente")
-	json.NewEncoder(w).Encode(bson.M{"message": "Diagnóstico actualizado exitosamente"})
-}
-
-// FindEstudioIDByImagenNombreHandler maneja la búsqueda del _id del estudio que contiene una imagen por su nombre.
-func BuscarEstudioIDImagenNombreHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
-	imagenNombre := r.URL.Query().Get("nombre")
-	if imagenNombre == "" {
-		http.Error(w, "El nombre de la imagen es requerido", http.StatusBadRequest)
-		log.Println("Error: El nombre de la imagen es requerido")
-		return
-	}
-
-	log.Printf("Buscando imagen con nombre: %s\n", imagenNombre)
-
-	estudioID, err := services.BuscarEstudioIDImagenNombre(imagenNombre, db)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Retornar el _id del estudio como respuesta JSON
-	response := struct {
-		EstudioID primitive.ObjectID `json:"estudio_id"`
-	}{EstudioID: estudioID}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
-	log.Printf("Retornando estudio ID: %s\n", estudioID.Hex())
-}
-
-// GetDiagnosticoHandler maneja la solicitud HTTP para obtener el diagnóstico más reciente
-func GetDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
-	// Obtener el ID desde los parámetros de la URL
-	idParam := r.URL.Query().Get("id")
-	if idParam == "" {
-		http.Error(w, "Falta el parámetro 'id'", http.StatusBadRequest)
-		return
-	}
-
-	// Convertir el id a ObjectID
-	id, err := primitive.ObjectIDFromHex(idParam)
-	if err != nil {
-		http.Error(w, "ID inválido", http.StatusBadRequest)
-		return
-	}
-
-	// Llamar al servicio para buscar el diagnóstico más reciente
-	ctx := r.Context()
-	diagnosticoReciente, err := services.BuscarDiagnosticoReciente(ctx, db, id)
-	if err != nil {
-		// Registrar el error en el servidor para diagnóstico
-		log.Printf("Error buscando diagnóstico: %v", err)
-		http.Error(w, "Error al obtener el diagnóstico", http.StatusInternalServerError)
-		return
-	}
-
-	// Responder con el diagnóstico más reciente en formato JSON
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(diagnosticoReciente); err != nil {
-		// Manejo de errores al codificar la respuesta JSON
-		log.Printf("Error al codificar la respuesta JSON: %v", err)
-		http.Error(w, "Error al procesar la respuesta", http.StatusInternalServerError)
-	}
-}
-
-func ActualizarDiagnosticoYClave(studyID string, imagenNombre string, diagnostico models.Diagnostico, nuevaClave string, db *mongo.Database) error {
-	// Convertir el studyID a ObjectID de MongoDB
-	objectID, err := primitive.ObjectIDFromHex(studyID)
-	if err != nil {
-		return fmt.Errorf("ID de estudio inválido: %v", err)
-	}
-
-	// Obtener la fecha actual
-	fechaActual := time.Now()
-	diagnostico.Fecha = fechaActual
-
-	// Loguear información sobre el diagnóstico
-	log.Printf("Actualizando diagnóstico para estudio ID: %s, imagen nombre: %s", studyID, imagenNombre)
-
-	// Buscar el ID de la imagen a partir del nombre
-	imagenID, err := BuscarEstudioIDImagenNombre(imagenNombre, db)
-	if err != nil {
-		return fmt.Errorf("error al encontrar la imagen: %v", err)
-	}
-
-	// Crear el filtro para buscar el estudio por su ID y la imagen específica por su ID
-	collection := db.Collection("estudios")
-	filter := bson.M{
-		"_id":            objectID,
-		"imagenes.dicom": imagenID.Hex(), // Filtrar por el ID de la imagen
-	}
-
-	// Loguear el filtro que se está utilizando
-	log.Printf("Filtro de búsqueda: %v", filter)
-
-	// Crear el nuevo diagnóstico para agregar al array
-	nuevoDiagnostico := bson.M{
-		"hallazgos":     diagnostico.Hallazgos,
-		"impresion":     diagnostico.Impresion,
-		"observaciones": diagnostico.Observaciones,
-		"fecha_Emision": diagnostico.Fecha, // Usar la fecha actual
-		"realizo":       diagnostico.Medico,
-	}
-
-	// Loguear el nuevo diagnóstico que se va a agregar
-	log.Printf("Nuevo diagnóstico a agregar: %v", nuevoDiagnostico)
-
-	// Operación de actualización para agregar el diagnóstico al array y actualizar la clave solo en la imagen seleccionada
-	update := bson.M{
-		"$push": bson.M{
-			"diagnostico": nuevoDiagnostico, // Agregar el nuevo diagnóstico
-		},
-		"$set": bson.M{
-			"imagenes.$.clave": nuevaClave, // Actualizar la clave solo en la imagen seleccionada
-		},
-	}
-
-	// Loguear la operación de actualización
-	log.Printf("Operación de actualización: %v", update)
-
-	// Ejecutar la actualización en MongoDB
-	result, err := collection.UpdateOne(context.Background(), filter, update)
-	if err != nil {
-		return fmt.Errorf("error al actualizar el diagnóstico y la clave en la base de datos: %v", err)
-	}
-
-	// Loguear el resultado de la operación
-	log.Printf("Resultado de la actualización: %+v", result)
-
-	if result.ModifiedCount == 0 {
-		return fmt.Errorf("no se encontró el estudio o no se actualizó el diagnóstico y la clave")
-	}
-
-	log.Println("Actualización completada exitosamente")
-	return nil
-}
-
+a partir de las siguientes funciones quiero que regrese el diagnostico dl estudio y la clave de la imagen que se esta usando para hacer las busquedas
 // BuscarEstudioIDImagenNombre busca el _id del estudio que contiene una imagen por su nombre.
-func BuscarEstudioIDImagenNombre(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
+func BuscarEstudioIDImagen(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
 
 	log.Println("Iniciando búsqueda del estudio para la imagen:", imagenNombre)
 
@@ -199,9 +22,29 @@ func BuscarEstudioIDImagenNombre(imagenNombre string, db *mongo.Database) (primi
 
 	log.Println("Imagen encontrada en 'imagenes.files':", fileDoc)
 
-	// Devolver el ID de la imagen encontrada
-	return fileDoc.ID, nil
+	// Buscando el estudio utilizando el ID de la imagen (como cadena de texto)
+	studyCollection := db.Collection("estudios")
+	studyFilter := bson.M{"imagenes.dicom": fileDoc.ID.Hex()} // Convertir el ObjectID a su representación hexadecimal (cadena)
+
+	log.Println("Buscando en la colección 'estudios' con el filtro:", studyFilter)
+	var estudio models.EstudioDocument
+	err = studyCollection.FindOne(context.Background(), studyFilter).Decode(&estudio)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			log.Printf("No se encontró el estudio que contiene la imagen con ID: %v", fileDoc.ID)
+			return primitive.ObjectID{}, fmt.Errorf("no se encontró el estudio que contiene la imagen")
+		}
+		log.Printf("Error al buscar el estudio: %v", err)
+		return primitive.ObjectID{}, fmt.Errorf("error al buscar el estudio: %v", err)
+	}
+
+	log.Println("Estudio encontrado:", estudio)
+
+	// Devolver el ID del estudio encontrado
+	log.Println("Devolviendo el ID del estudio:", estudio.ID)
+	return estudio.ID, nil
 }
+
 
 // BuscarDiagnosticoReciente busca el diagnóstico más reciente de un estudio dado su _id
 func BuscarDiagnosticoReciente(ctx context.Context, db *mongo.Database, id primitive.ObjectID) (*models.Diagnostico, error) {
@@ -233,4 +76,107 @@ func BuscarDiagnosticoReciente(ctx context.Context, db *mongo.Database, id primi
 	}
 
 	return &diagnosticoReciente, nil
+}
+esta es la estrctura de los documentos de mongo
+type Imagen struct {
+	Clave       string `bson:"clave"`
+	Dicom       string `bson:"dicom"`
+	Imagen      string `bson:"imagen"`
+	Anonimizada bool   `bson:"anonimizada"`
+}
+
+type Diagnostico struct {
+	Hallazgos     string    `bson:"hallazgos"`
+	Impresion     string    `bson:"impresion"`
+	Observaciones string    `bson:"observaciones"`
+	Fecha         time.Time `bson:"fecha_Emision"`
+	Medico        string    `bson:"realizo"`
+}
+
+type EstudioDocument struct {
+	ID          primitive.ObjectID `bson:"_id,omitempty"`
+	EstudioID   string             `bson:"estudio_ID"`
+	Donador     string             `bson:"donador"`
+	Hash        string             `bson:"hash"`
+	Status      int                `bson:"status"`
+	Imagenes    []Imagen           `bson:"imagenes"`
+	Diagnostico []Diagnostico      `bson:"diagnostico"`
+}
+este es un ejemplo del documento de mongo{
+  "_id": {
+    "$oid": "66fbfb2df8d2fdad53229fa0"
+  },
+  "estudio_ID": "66fbfb2df8d2fdad53229f6b",
+  "donador": "DonadorEjemplo",
+  "hash": "b3c49f92cdddc3cb1e7fa3eb84071e339a5f24ecc70dfec20b3959dadabddbae",
+  "status": 1,
+  "imagenes": [
+    {
+      "clave": "01000000100",
+      "dicom": "66fbfb2df8d2fdad53229f6c",
+      "imagen": "",
+      "anonimizada": false
+    },
+    {
+      "clave": "01000000100",
+      "dicom": "66fbfb2df8d2fdad53229f73",
+      "imagen": "",
+      "anonimizada": false
+    },
+    {
+      "clave": "01000000100",
+      "dicom": "66fbfb2df8d2fdad53229f7b",
+      "imagen": "",
+      "anonimizada": false
+    },
+    {
+      "clave": "01000000100",
+      "dicom": "66fbfb2df8d2fdad53229f83",
+      "imagen": "66fbfb2df8d2fdad53229f8a",
+      "anonimizada": true
+    },
+    {
+      "clave": "01000000100",
+      "dicom": "66fbfb2df8d2fdad53229f8c",
+      "imagen": "66fbfb2df8d2fdad53229f94",
+      "anonimizada": true
+    },
+    {
+      "clave": "01000000100",
+      "dicom": "66fbfb2df8d2fdad53229f96",
+      "imagen": "66fbfb2df8d2fdad53229f9e",
+      "anonimizada": true
+    }
+  ],
+  "diagnostico": [
+    {
+      "hallazgos": "",
+      "impresion": "",
+      "observaciones": "",
+      "fecha_Emision": {
+        "$date": {
+          "$numberLong": "-62135596800000"
+        }
+      },
+      "realizo": ""
+    },
+    {
+      "hallazgos": "sdfgsdf",
+      "impresion": "dshfdhsfdj",
+      "observaciones": "sfdjdsfj",
+      "fecha_Emision": {
+        "$date": "2024-10-04T17:40:15.062Z"
+      },
+      "realizo": ""
+    },
+    {
+      "hallazgos": "sdfgsdffdsd",
+      "impresion": "dshfdhsfdjdsfgdfsg",
+      "observaciones": "sfdjdsfjdfshjfhds",
+      "fecha_Emision": {
+        "$date": "2024-10-04T17:41:50.543Z"
+      },
+      "realizo": "Donatello Tortuga ninja"
+    }
+  ]
 }

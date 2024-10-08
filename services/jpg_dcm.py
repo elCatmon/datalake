@@ -1,35 +1,20 @@
-import pydicom
-import os
-import sys
-from pydicom.dataset import FileDataset
-import numpy as np
 from PIL import Image
-import datetime
+import numpy as np
+import pydicom
+from pydicom.dataset import FileDataset
 from pydicom.uid import ExplicitVRLittleEndian
-import logging
-
-# Configurar el logging para que registre en la consola y en un archivo
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', handlers=[
-    logging.FileHandler("conversion_jpg_a_dicom.log"),
-    logging.StreamHandler(sys.stdout)
-])
+import datetime
+import sys
 
 # Función para convertir de JPG a DICOM
 def jpg_to_dicom(input_file_path, output_file_path):
     try:
         # Validar la extensión del archivo de entrada
-        logging.info(f"Iniciando conversión de JPG a DICOM para el archivo: {input_file_path}")
-
         # Abrir la imagen JPG usando PIL
         img = Image.open(input_file_path)
-        logging.info(f"Archivo JPG abierto exitosamente: {input_file_path}")
-
         img = img.convert('L')  # Convertir a escala de grises
-        logging.info("Imagen convertida a escala de grises")
-
         # Redimensionar la imagen a 4096x4096
         img = img.resize((4096, 4096))
-        logging.info("Imagen redimensionada a 4096x4096")
 
         np_img = np.array(img)
 
@@ -81,20 +66,18 @@ def jpg_to_dicom(input_file_path, output_file_path):
         # Guardar el archivo DICOM
         ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
         ds.save_as(output_file_path, write_like_original=False)
-
-        logging.info(f"Conversión completada exitosamente. Archivo DICOM guardado en: {output_file_path}")
+        # Redimensionar la imagen original a 150x150
+        img.thumbnail((150, 150))
+        img.save(input_file_path)
         return output_file_path
 
     except Exception as e:
-        logging.error(f"Error durante la conversión de JPG a DICOM: {str(e)}")
         return None
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        logging.error("Uso incorrecto. Se requieren dos argumentos: (ruta del archivo JPG, ruta del archivo de salida DICOM).")
         sys.exit(1)
 
     input_file_path = sys.argv[1]
     output_file_path = sys.argv[2]
-    logging.info(f"Script iniciado con el archivo: {input_file_path}")
     jpg_to_dicom(input_file_path, output_file_path)

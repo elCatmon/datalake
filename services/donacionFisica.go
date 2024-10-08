@@ -3,7 +3,6 @@ package services
 import (
 	"fmt"
 	"io"
-	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -19,8 +18,6 @@ import (
 
 // Sube información de la donación física anonimizada con conversión de archivos JPG
 func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gridfs.Bucket, r *http.Request, database *mongo.Database) {
-	log.Println("Iniciando proceso de subida de donación física.")
-
 	estudioID, _ := datos[0].(string)
 	donador, _ := datos[1].(string)
 	estudio, _ := datos[2].(string)
@@ -32,15 +29,11 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 	anonymizedFiles, _ := datos[8].([]*multipart.FileHeader)
 	originalFiles, _ := datos[9].([]*multipart.FileHeader)
 
-	log.Printf("EstudioID: %s, Donador: %s, Estudio: %s, Sexo: %s, Edad: %s, Archivos Anonimizados: %v, Archivos Originales: %v", estudioID, donador, estudio, sexo, edad, anonymizedFiles, originalFiles)
-
 	// Clave única del estudio
 	clave := estudio + region + "00" + valida + "0" + "1" + sexo + edad
-	log.Printf("Clave generada: %s", clave)
 
 	if len(originalFiles) == 0 || len(anonymizedFiles) == 0 {
 		http.Error(w, "Debe haber archivos originales y anonimizados", http.StatusBadRequest)
-		log.Println("Error: No hay archivos originales o anonimizados.")
 		return
 	}
 
@@ -48,34 +41,23 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 
 	// Subir archivos anonimizados
 	for _, fileHeader := range anonymizedFiles {
-
-		log.Printf("Procesando archivo anonimizado: %s", fileHeader.Filename)
-
 		// Crear una ruta temporal para el archivo
 		tempFilePath := fmt.Sprintf("./archivos/%s", fileHeader.Filename)
 		NameWithoutExt := filepath.Base(tempFilePath[:len(tempFilePath)-len(filepath.Ext(tempFilePath))])
-
 		// Ruta para el archivo DICOM modificado
 		dcmFilePath := fmt.Sprintf("./archivos/%s_M.dcm", NameWithoutExt)
-
 		// Ruta para el archivo JPG modificado
 		jpgFilePath := fmt.Sprintf("./archivos/%s_M.jpg", NameWithoutExt)
-
-		log.Printf("Ruta del archivo DICOM modificado: %s", dcmFilePath)
-		log.Printf("Ruta del archivo JPG modificado: %s", jpgFilePath)
-
 		// Guardar el archivo temporalmente
 		if err := guardarArchivoTemporal(fileHeader, jpgFilePath); err != nil {
 			http.Error(w, "Error al guardar archivo temporal", http.StatusInternalServerError)
 			return
 		}
-
 		// Convertir el archivo a JPG (si es necesario)
 		if err := convertirArchivoJPG(jpgFilePath, dcmFilePath); err != nil {
 			http.Error(w, "Error al convertir archivo a JPG", http.StatusInternalServerError)
 			return
 		}
-
 		// Subir archivo original a GridFS
 		fileID, err := subirArchivoCGridFS(jpgFilePath, bucket)
 		if err != nil {
@@ -101,7 +83,6 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 			Imagen:      fileID,
 			Anonimizada: true,
 		})
-		log.Printf("Archivo anonimizado subido y almacenado en GridFS con ID: %s", fileID)
 	}
 
 	// Subir archivos original (sin conversión)
@@ -129,14 +110,11 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 			http.Error(w, "Error al subir archivo DICOM", http.StatusInternalServerError)
 			return
 		}
-
-		log.Printf("Subiendo archivo original: %s", fileHeader.Filename)
 		fileID, err := subirArchivoGridFS(fileHeader, bucket)
 		if err != nil {
 			http.Error(w, "Error al subir archivo original", http.StatusInternalServerError)
 			return
 		}
-
 		// Limpiar archivos temporales
 		defer os.Remove(OtempFilePath)
 		defer os.Remove(OdcmFilePath)
@@ -147,7 +125,6 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 			Imagen:      fileID,
 			Anonimizada: false,
 		})
-		log.Printf("Archivo original subido y almacenado en GridFS con ID: %s", fileID)
 	}
 
 	// Crear documento del estudio
@@ -166,49 +143,38 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 			},
 		},
 	}
-
-	log.Println("Insertando documento de estudio en la base de datos.")
 	// Insertar el documento en la base de datos
 	collection := database.Collection("estudios")
 	if _, err := collection.InsertOne(r.Context(), estudioDoc); err != nil {
 		http.Error(w, "Error al insertar documento", http.StatusInternalServerError)
-		log.Printf("Error al insertar documento en la base de datos: %v", err)
 		return
 	}
-
-	log.Println("Documento insertado exitosamente en la base de datos.")
 }
 
 // Guardar archivo temporalmente
 func guardarArchivoTemporal(fileHeader *multipart.FileHeader, filePath string) error {
-	log.Printf("Guardando archivo temporalmente: %s", filePath)
 	file, err := fileHeader.Open()
 	if err != nil {
-		log.Printf("Error al abrir archivo temporal: %v", err)
 		return err
 	}
 	defer file.Close()
 
 	out, err := os.Create(filePath)
 	if err != nil {
-		log.Printf("Error al crear archivo temporal: %v", err)
 		return err
 	}
 	defer out.Close()
 
 	_, err = io.Copy(out, file)
 	if err != nil {
-		log.Printf("Error al copiar archivo temporal: %v", err)
 	}
 	return err
 }
 
 // Función para subir cualquier archivo a GridFS
 func subirArchivoCGridFS(filePath string, bucket *gridfs.Bucket) (string, error) {
-	log.Printf("Subiendo archivo a GridFS: %s", filePath)
 	file, err := os.Open(filePath)
 	if err != nil {
-		log.Printf("Error al abrir archivo: %v", err)
 		return "", err
 	}
 	defer file.Close()
@@ -216,7 +182,6 @@ func subirArchivoCGridFS(filePath string, bucket *gridfs.Bucket) (string, error)
 	// Crear un stream de subida a GridFS
 	uploadStream, err := bucket.OpenUploadStream(filepath.Base(filePath))
 	if err != nil {
-		log.Printf("Error al abrir stream de subida a GridFS: %v", err)
 		return "", err
 	}
 	defer uploadStream.Close()
@@ -224,17 +189,13 @@ func subirArchivoCGridFS(filePath string, bucket *gridfs.Bucket) (string, error)
 	// Copiar el contenido del archivo al stream de subida
 	_, err = io.Copy(uploadStream, file)
 	if err != nil {
-		log.Printf("Error al copiar archivo al stream: %v", err)
 		return "", err
 	}
-
-	log.Printf("Archivo subido a GridFS con éxito, ID: %s", uploadStream.FileID.(primitive.ObjectID).Hex())
 	return uploadStream.FileID.(primitive.ObjectID).Hex(), nil
 }
 
 // Función para convertir el archivo a JPG
 func convertirArchivoJPG(tempFilePath, jpgFilePath string) error {
-	log.Printf("Ejecutando script de conversión para %s", tempFilePath)
 	var cmd *exec.Cmd
 
 	// Detectar el sistema operativo
@@ -245,39 +206,30 @@ func convertirArchivoJPG(tempFilePath, jpgFilePath string) error {
 	}
 
 	// Ejecutar el comando
-	output, err := cmd.CombinedOutput()
+	_, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("Error al ejecutar el script de conversión: %v, output: %s", err, string(output))
 		return fmt.Errorf("error al ejecutar el script de conversión: %w", err)
 	}
-
-	log.Printf("Script de conversión ejecutado correctamente para %s", tempFilePath)
 	return nil
 }
 
 // Función para subir archivos a GridFS
 func subirArchivoGridFS(fileHeader *multipart.FileHeader, bucket *gridfs.Bucket) (string, error) {
-	log.Printf("Subiendo archivo a GridFS: %s", fileHeader.Filename)
 	file, err := fileHeader.Open()
 	if err != nil {
-		log.Printf("Error al abrir archivo: %v", err)
 		return "", err
 	}
 	defer file.Close()
 
 	uploadStream, err := bucket.OpenUploadStream(fileHeader.Filename)
 	if err != nil {
-		log.Printf("Error al abrir stream de subida a GridFS: %v", err)
 		return "", err
 	}
 	defer uploadStream.Close()
 
 	_, err = io.Copy(uploadStream, file)
 	if err != nil {
-		log.Printf("Error al copiar archivo al stream: %v", err)
 		return "", err
 	}
-
-	log.Printf("Archivo subido a GridFS con éxito, ID: %s", uploadStream.FileID.(primitive.ObjectID).Hex())
 	return uploadStream.FileID.(primitive.ObjectID).Hex(), nil
 }
