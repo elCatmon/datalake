@@ -311,7 +311,7 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 	var jpgFiles []string
 	estudioID := primitive.NewObjectID().Hex()
 	donador := "DonadorEjemplo" // Valor ejemplo, reemplazar por el valor correcto
-	estudio, err := getValueOrError(r.MultipartForm.Value, "tipoEstudio")
+	estudio, _ := getValueOrError(r.MultipartForm.Value, "tipoEstudio")
 	clave := estudio + "00" + "00" + "0" + "0" + "1" + "0" + "0"
 	hash := GenerateHash(donador, estudio)
 
@@ -555,47 +555,4 @@ func BuscarDiagnosticoReciente(ctx context.Context, db *mongo.Database, id primi
 	}
 
 	return &diagnosticoReciente, nil
-}
-
-// BuscarEstudioYDiagnostico busca el estudio y su diagnóstico más reciente utilizando el nombre de una imagen.
-func BuscarEstudioYDiagnostico(imagenNombre string, db *mongo.Database) (string, *models.Diagnostico, error) {
-	ctx := context.Background()
-
-	// Buscar el ID del estudio basado en el nombre de la imagen
-	estudioID, err := BuscarEstudioIDImagen(imagenNombre, db)
-	if err != nil {
-		return "", nil, fmt.Errorf("error al buscar el estudio: %v", err)
-	}
-
-	// Buscar el diagnóstico más reciente usando el ID del estudio
-	diagnostico, err := BuscarDiagnosticoReciente(ctx, db, estudioID)
-	if err != nil {
-		return "", nil, fmt.Errorf("error al buscar el diagnóstico más reciente: %v", err)
-	}
-
-	// Buscar la clave de la imagen dentro del estudio
-	studyCollection := db.Collection("estudios")
-	var estudio models.EstudioDocument
-	studyFilter := bson.M{"_id": estudioID}
-
-	err = studyCollection.FindOne(ctx, studyFilter).Decode(&estudio)
-	if err != nil {
-		return "", nil, fmt.Errorf("error al obtener el estudio: %v", err)
-	}
-
-	// Encontrar la clave de la imagen correspondiente
-	var claveImagen string
-	for _, imagen := range estudio.Imagenes {
-		if imagen.Imagen == imagenNombre {
-			claveImagen = imagen.Clave
-			break
-		}
-	}
-
-	if claveImagen == "" {
-		return "", nil, fmt.Errorf("no se encontró la clave de la imagen para el nombre: %s", imagenNombre)
-	}
-
-	// Retornar la clave de la imagen y el diagnóstico más reciente
-	return claveImagen, diagnostico, nil
 }
