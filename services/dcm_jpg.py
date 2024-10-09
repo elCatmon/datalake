@@ -3,7 +3,6 @@ import sys
 from pydicom.pixel_data_handlers.util import apply_voi_lut
 import numpy as np
 from PIL import Image
-import logging
 
 # Función para convertir de DICOM a JPG
 def dicom_to_jpeg(input_file_path, output_file_path):
@@ -35,10 +34,8 @@ def dicom_to_jpeg(input_file_path, output_file_path):
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        logging.error("Uso incorrecto. Se requieren dos argumentos: (ruta del archivo DICOM, ruta del archivo de salida).")
         sys.exit(1)
 
     input_file_path = sys.argv[1]
     output_file_path = sys.argv[2]
-    logging.info(f"Script iniciado con el archivo: {input_file_path}")
     dicom_to_jpeg(input_file_path, output_file_path)
