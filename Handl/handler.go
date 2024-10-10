@@ -290,12 +290,18 @@ func BuscarEstudioIDImagenNombreHandler(w http.ResponseWriter, r *http.Request, 
 	json.NewEncoder(w).Encode(response)
 }
 
-// GetDiagnosticoReciente maneja la solicitud HTTP para obtener el diagnóstico más reciente
+// GetDiagnosticoHandler maneja la solicitud HTTP para obtener el diagnóstico más reciente
 func GetDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 	// Obtener el ID desde los parámetros de la URL
 	idParam := r.URL.Query().Get("id")
 	if idParam == "" {
 		http.Error(w, "Falta el parámetro 'id'", http.StatusBadRequest)
+		return
+	}
+
+	nombreImagen := r.URL.Query().Get("nombreImagen")
+	if nombreImagen == "" {
+		http.Error(w, "Falta el parámetro 'nombreImagen'", http.StatusBadRequest)
 		return
 	}
 
@@ -306,15 +312,24 @@ func GetDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Dat
 		return
 	}
 
-	// Llamar al servicio para buscar el diagnóstico más reciente
+	// Llamar al servicio para buscar el diagnóstico más reciente y la clave de la imagen
 	ctx := r.Context()
-	diagnosticoReciente, err := services.BuscarDiagnosticoReciente(ctx, db, id)
+	diagnosticoReciente, clave, err := services.BuscarDiagnosticoReciente(ctx, db, id, nombreImagen)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Responder con el diagnóstico más reciente en formato JSON
+	// Crear la respuesta con diagnóstico y clave
+	response := struct {
+		Diagnostico *models.Diagnostico `json:"diagnostico"`
+		Clave       string              `json:"clave"`
+	}{
+		Diagnostico: diagnosticoReciente,
+		Clave:       clave,
+	}
+
+	// Responder con el diagnóstico más reciente y la clave en formato JSON
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(diagnosticoReciente)
+	json.NewEncoder(w).Encode(response)
 }

@@ -251,6 +251,11 @@ func ProcesarDonacionFisica(w http.ResponseWriter, r *http.Request) ([]interface
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 
+	region, err := getValueOrError(formData.Value, "region")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+
 	sexo, err := getValueOrError(formData.Value, "sexo")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -288,7 +293,7 @@ func ProcesarDonacionFisica(w http.ResponseWriter, r *http.Request) ([]interface
 		return nil, errors.New("no anonymized files uploaded")
 	}
 
-	datos := []interface{}{estudioID, donador, estudio, hash, "00", "0", sexo, edad, anonymizedFiles, originalFiles}
+	datos := []interface{}{estudioID, donador, estudio, hash, region, "0", sexo, edad, anonymizedFiles, originalFiles}
 
 	return datos, err
 }
@@ -311,7 +316,7 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 	var jpgFiles []string
 	estudioID := primitive.NewObjectID().Hex()
 	donador := "DonadorEjemplo" // Valor ejemplo, reemplazar por el valor correcto
-	estudio, err := getValueOrError(r.MultipartForm.Value, "tipoEstudio")
+	estudio, _ := getValueOrError(r.MultipartForm.Value, "tipoEstudio")
 	clave := estudio + "00" + "00" + "0" + "0" + "1" + "0" + "0"
 	hash := GenerateHash(donador, estudio)
 
@@ -525,8 +530,8 @@ func BuscarImagenEstudioNombre(imagenNombre string, db *mongo.Database) (primiti
 	return fileDoc.ID, nil
 }
 
-// BuscarDiagnosticoReciente busca el diagnóstico más reciente de un estudio dado su _id
-func BuscarDiagnosticoReciente(ctx context.Context, db *mongo.Database, id primitive.ObjectID) (*models.Diagnostico, error) {
+// BuscarDiagnosticoReciente busca el diagnóstico más reciente de un estudio dado su _id y el nombre de la imagen
+func BuscarDiagnosticoReciente(ctx context.Context, db *mongo.Database, id primitive.ObjectID, nombreImagen string) (*models.Diagnostico, string, error) {
 	// Definir la colección
 	collection := db.Collection("estudios")
 
@@ -536,14 +541,14 @@ func BuscarDiagnosticoReciente(ctx context.Context, db *mongo.Database, id primi
 	err := collection.FindOne(ctx, filter).Decode(&estudio)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return nil, errors.New("no se encontró el documento con el ID proporcionado")
+			return nil, "", errors.New("no se encontró el documento con el ID proporcionado")
 		}
-		return nil, err
+		return nil, "", err
 	}
 
 	// Si no tiene diagnósticos, regresar un error
 	if len(estudio.Diagnostico) == 0 {
-		return nil, errors.New("el estudio no tiene diagnósticos")
+		return nil, "", errors.New("el estudio no tiene diagnósticos")
 	}
 
 	// Encontrar el diagnóstico más reciente
@@ -554,48 +559,46 @@ func BuscarDiagnosticoReciente(ctx context.Context, db *mongo.Database, id primi
 		}
 	}
 
-	return &diagnosticoReciente, nil
+	// Obtener la clave de la imagen basada en el nombre de la imagen
+	clave, err := GetImageKeyByFileName(nombreImagen, db)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return &diagnosticoReciente, clave, nil
 }
 
-// BuscarEstudioYDiagnostico busca el estudio y su diagnóstico más reciente utilizando el nombre de una imagen.
-func BuscarEstudioYDiagnostico(imagenNombre string, db *mongo.Database) (string, *models.Diagnostico, error) {
-	ctx := context.Background()
+// Función para buscar la clave de una imagen por su nombre en GridFS.
+func GetImageKeyByFileName(filename string, db *mongo.Database) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	// Buscar el ID del estudio basado en el nombre de la imagen
-	estudioID, err := BuscarEstudioIDImagen(imagenNombre, db)
+	// Buscar el archivo en GridFS.
+	var fileDoc models.FileDocument
+	err := db.Collection("imagenes.files").FindOne(ctx, bson.M{"filename": filename}).Decode(&fileDoc)
 	if err != nil {
-		return "", nil, fmt.Errorf("error al buscar el estudio: %v", err)
+		if err == mongo.ErrNoDocuments {
+			return "", errors.New("archivo no encontrado en GridFS")
+		}
+		return "", fmt.Errorf("error buscando el archivo en GridFS: %v", err)
 	}
 
-	// Buscar el diagnóstico más reciente usando el ID del estudio
-	diagnostico, err := BuscarDiagnosticoReciente(ctx, db, estudioID)
+	// Buscar en la colección `estudios` usando el ID del archivo.
+	var estudioDoc models.EstudioDocument
+	err = db.Collection("estudios").FindOne(ctx, bson.M{"imagenes.dicom": fileDoc.ID.Hex()}).Decode(&estudioDoc)
 	if err != nil {
-		return "", nil, fmt.Errorf("error al buscar el diagnóstico más reciente: %v", err)
+		if err == mongo.ErrNoDocuments {
+			return "", errors.New("no se encontró referencia en la colección de estudios")
+		}
+		return "", fmt.Errorf("error buscando en la colección de estudios: %v", err)
 	}
 
-	// Buscar la clave de la imagen dentro del estudio
-	studyCollection := db.Collection("estudios")
-	var estudio models.EstudioDocument
-	studyFilter := bson.M{"_id": estudioID}
-
-	err = studyCollection.FindOne(ctx, studyFilter).Decode(&estudio)
-	if err != nil {
-		return "", nil, fmt.Errorf("error al obtener el estudio: %v", err)
-	}
-
-	// Encontrar la clave de la imagen correspondiente
-	var claveImagen string
-	for _, imagen := range estudio.Imagenes {
-		if imagen.Imagen == imagenNombre {
-			claveImagen = imagen.Clave
-			break
+	// Recorrer las imágenes para encontrar la clave correspondiente.
+	for _, imagen := range estudioDoc.Imagenes {
+		if imagen.Dicom == fileDoc.ID.Hex() { // Verificar si el DICOM coincide con el ID del archivo en formato hexadecimal.
+			return imagen.Clave, nil
 		}
 	}
 
-	if claveImagen == "" {
-		return "", nil, fmt.Errorf("no se encontró la clave de la imagen para el nombre: %s", imagenNombre)
-	}
-
-	// Retornar la clave de la imagen y el diagnóstico más reciente
-	return claveImagen, diagnostico, nil
+	return "", errors.New("clave no encontrada para la imagen")
 }
