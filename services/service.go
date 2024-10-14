@@ -133,7 +133,7 @@ func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
 	// Filtro obligatorio por tipo de estudio (primeros 2 dígitos de la clave)
 	if tipoEstudio != "" {
 		filter["imagenes.clave"] = bson.M{
-			"$regex": "^" + tipoEstudio, // Filtro por tipo de estudio
+			"$regex": "^" + tipoEstudio + ".*", // Filtro por tipo de estudio (primeros 2 dígitos)
 		}
 	} else {
 		// Retornar error si el tipo de estudio no se especifica, ya que es obligatorio
@@ -141,11 +141,34 @@ func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
 	}
 
 	// Filtros opcionales
-	// Filtro por región (3to y 4to dígito de la clave)
+	// Filtro por región (3er y 4to dígito de la clave)
 	if region != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{2}" + region, // Filtra por región si está presente
+		switch region {
+		case "02":
+			filter["imagenes.clave"] = bson.M{
+				"$regex": "^..(0[2-7]).*", // Filtro por región entre 02 y 07, sin tener en cuenta el tipo de estudio
+			}
+		case "08":
+			filter["imagenes.clave"] = bson.M{
+				"$regex": "^..(0[8-9]).*", // Filtro por región entre 08 y 09
+			}
+		case "10":
+			filter["imagenes.clave"] = bson.M{
+				"$regex": "^..(1[0-6]).*", // Filtro por región entre 10 y 16
+			}
+		case "18":
+			filter["imagenes.clave"] = bson.M{
+				"$regex": "^..(1[8-9]|2[0-3]).*", // Filtro por región entre 18 y 23
+			}
+		default:
+			// Filtro por región genérico si no coincide con ninguna de las opciones anteriores
+			filter["imagenes.clave"] = bson.M{
+				"$regex": "^.." + region + ".*", // Filtro genérico solo por región
+			}
 		}
+	} else {
+		// Si region es una cadena vacía, no aplicamos filtro por región
+		// Esto permitirá mostrar todas las imágenes independientemente de la región
 	}
 
 	// Filtro por proyección (8vo y 9no dígito de la clave)
