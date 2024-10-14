@@ -333,3 +333,23 @@ func GetDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Dat
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
+
+func DatasetHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket) {
+	var estudios []models.EstudioDocument
+
+	// Decodificar el cuerpo de la solicitud
+	if err := json.NewDecoder(r.Body).Decode(&estudios); err != nil {
+		http.Error(w, "Error decodificando el JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Aquí llamamos a la función para renombrar archivos zip
+	rutaZip := "../archivos/estudios.zip" // Cambia esto a la ruta deseada
+	tipoArchivo := r.URL.Query().Get("type")
+
+	services.renombrarArchivosZip(estudios, bucket, rutaZip, tipoArchivo)
+
+	// Respuesta exitosa
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Archivos renombrados y zip creados correctamente."))
+}

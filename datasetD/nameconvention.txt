@@ -1,5 +1,5 @@
-Cada archivo tiene el siguiente formato: <tipo de estudio><region><proyeccion><valida><origen><obtencion><sexo><edad><identificador_secuencial>.dcm/.jpg
-Ejemplo: 010205111000001.dcm
+Cada archivo tiene el siguiente formato: <tipo de estudio><region><proyeccion><valida><origen><obtencion><sexo><edad>_<identificador_secuencial>.dcm/.jpg
+Ejemplo: 01020511100_0001.dcm
 Desglose del nombre:
 - Caracter 1 y 2: Tipo de estudio
     01 - Radiografía
@@ -54,4 +54,4 @@ Desglose del nombre:
     5 - Adulto joven (19 a 26 años)
     6 - Adulto (27 a 59 años)
     7 - Adulto mayor (60 años y mas)
-- Caracter 12 - 16: identificador secuencial
+- Caracter _(12 - 16): identificador secuencial

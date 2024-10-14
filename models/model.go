@@ -47,3 +47,9 @@ type EstudioDocument struct {
 	Imagenes    []Imagen           `bson:"imagenes"`
 	Diagnostico []Diagnostico      `bson:"diagnostico"`
 }
+
+type ImagenMetadata struct {
+	NombreArchivo string      `json:"nombreArchivo"`
+	Clave         string      `json:"clave"`
+	Diagnostico   Diagnostico `json:"diagnostico"`
+}

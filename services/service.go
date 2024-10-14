@@ -4,6 +4,7 @@ package services
 
 // Importacion de librerias
 import (
+	"archive/zip"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -11,9 +12,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"webservice/config"
 	"webservice/models"
@@ -601,4 +604,146 @@ func GetImageKeyByFileName(filename string, db *mongo.Database) (string, error) 
 	}
 
 	return "", errors.New("clave no encontrada para la imagen")
+}
+
+func renombrarArchivosZip(estudios []models.EstudioDocument, bucket *gridfs.Bucket, rutaZip string, tipoArchivo string) {
+	// Crear un nuevo archivo ZIP
+	log.Printf("Creando archivo ZIP en la ruta: %s\n", rutaZip)
+	outFile, err := os.Create(rutaZip)
+	if err != nil {
+		log.Fatalf("Error al crear archivo ZIP: %v", err)
+	}
+	defer outFile.Close()
+
+	zipWriter := zip.NewWriter(outFile)
+	defer zipWriter.Close()
+	datasetD.crearArchivosMetadata()
+
+	// Añadir los archivos de metadata (README.txt y nameconvention.txt)
+	for _, file := range []string{"README.txt", "nameconvention.txt"} {
+		fileData, err := os.ReadFile(file)
+		if err != nil {
+			log.Fatalf("Error leyendo archivo %s: %v", file, err)
+		}
+		w, err := zipWriter.Create("metadatos/" + file) // Crear en la carpeta 'metadatos'
+		if err != nil {
+			log.Fatalf("Error añadiendo %s al ZIP: %v", file, err)
+		}
+		if _, err := w.Write(fileData); err != nil {
+			log.Fatalf("Error escribiendo %s en el ZIP: %v", file, err)
+		}
+		log.Printf("Archivo %s añadido correctamente al ZIP en la carpeta 'metadatos'.\n", file)
+	}
+
+	serial := 1
+	metadatos := []models.ImagenMetadata{} // Inicializa la lista de metadatos
+
+	// Añadir archivos renombrados al ZIP en la carpeta 'imagenes'
+	for _, estudio := range estudios {
+		for _, imagen := range estudio.Imagenes {
+			if imagen.Anonimizada { // Filtrar solo las imágenes anonimizadas
+				var nuevoNombre string
+
+				if tipoArchivo == "dcm" && imagen.Dicom != "" { // Change this line
+					nuevoNombre = datasetD.generarNombreArchivo(imagen.Clave, serial) // Solo el nombre base
+
+					// Convertir el DICOM ID de string a ObjectID
+					dicomID, err := primitive.ObjectIDFromHex(imagen.Dicom)
+					if err != nil {
+						log.Printf("Error convirtiendo DICOM ID desde string: %v", err)
+						continue
+					}
+
+					// Obtener el archivo DICOM desde GridFS usando el _id almacenado en imagen.Dicom
+					archivoDicom, err := datasetD.obtenerArchivoDesdeGridFS(bucket, dicomID)
+					if err != nil {
+						log.Printf("Error obteniendo archivo DICOM con ID %v: %v", dicomID, err)
+						continue
+					}
+
+					// Crear el archivo dentro del ZIP con el nuevo nombre en la carpeta 'imagenes'
+					w, err := zipWriter.Create("imagenes/" + nuevoNombre) // Agregar solo el nombre sin extensión
+					if err != nil {
+						log.Fatalf("Error creando archivo %s en el ZIP: %v", nuevoNombre, err)
+					}
+					if _, err := w.Write(archivoDicom); err != nil {
+						log.Fatalf("Error escribiendo archivo %s en el ZIP: %v", nuevoNombre, err)
+					}
+					log.Printf("Archivo DICOM %s añadido correctamente al ZIP en la carpeta 'imagenes'.\n", nuevoNombre)
+
+					// Añadir metadatos al JSON
+					if len(estudio.Diagnostico) > 0 {
+						diagnosticoReciente := estudio.Diagnostico[len(estudio.Diagnostico)-1]
+						metadatos = append(metadatos, models.ImagenMetadata{
+							NombreArchivo: nuevoNombre,
+							Clave:         imagen.Clave,
+							Diagnostico: models.Diagnostico{
+								Hallazgos:     diagnosticoReciente.Hallazgos,
+								Impresion:     diagnosticoReciente.Impresion,
+								Observaciones: diagnosticoReciente.Observaciones,
+								Fecha:         diagnosticoReciente.Fecha,
+								Medico:        diagnosticoReciente.Medico,
+							},
+						})
+					}
+
+					serial++ // Incrementar el número de serie
+
+				} else if tipoArchivo == "jpg" && imagen.Imagen != "" { // Change this line
+					nuevoNombre = datasetD.generarNombreArchivo(imagen.Clave, serial) // Solo el nombre base
+
+					// Convertir el JPG ID de string a ObjectID
+					imagenID, err := primitive.ObjectIDFromHex(imagen.Imagen)
+					if err != nil {
+						log.Printf("Error convirtiendo JPG ID desde string: %v", err)
+						continue
+					}
+
+					// Obtener el archivo JPG desde GridFS usando el _id almacenado en imagen.Imagen
+					archivoJPG, err := datasetD.obtenerArchivoDesdeGridFS(bucket, imagenID)
+					if err != nil {
+						log.Printf("Error obteniendo archivo JPG con ID %v: %v", imagenID, err)
+						continue
+					}
+
+					// Asegúrate de que el nombre no contenga .dcm
+					nuevoNombre = strings.TrimSuffix(nuevoNombre, ".dcm") // Eliminar .dcm si está presente
+
+					// Crear el archivo dentro del ZIP con el nuevo nombre en la carpeta 'imagenes'
+					w, err := zipWriter.Create("imagenes/" + nuevoNombre + ".jpg") // Agregar la extensión .jpg
+					if err != nil {
+						log.Fatalf("Error creando archivo %s en el ZIP: %v", nuevoNombre, err)
+					}
+					if _, err := w.Write(archivoJPG); err != nil {
+						log.Fatalf("Error escribiendo archivo %s en el ZIP: %v", nuevoNombre, err)
+					}
+					log.Printf("Archivo JPG %s añadido correctamente al ZIP en la carpeta 'imagenes'.\n", nuevoNombre)
+
+					// Añadir metadatos al JSON
+					if len(estudio.Diagnostico) > 0 {
+						diagnosticoReciente := estudio.Diagnostico[len(estudio.Diagnostico)-1]
+						metadatos = append(metadatos, models.ImagenMetadata{
+							NombreArchivo: nuevoNombre + ".jpg", // Asegúrate de incluir la extensión aquí también
+							Clave:         imagen.Clave,
+							Diagnostico: models.Diagnostico{
+								Hallazgos:     diagnosticoReciente.Hallazgos,
+								Impresion:     diagnosticoReciente.Impresion,
+								Observaciones: diagnosticoReciente.Observaciones,
+								Fecha:         diagnosticoReciente.Fecha,
+								Medico:        diagnosticoReciente.Medico,
+							},
+						})
+					}
+					serial++ // Incrementar el número de serie
+				}
+			}
+		}
+	}
+
+	// Crear el archivo JSON y añadirlo al ZIP
+	if err := datasetD.crearArchivoJSON(zipWriter, metadatos); err != nil {
+		log.Fatalf("Error creando archivo JSON: %v", err)
+	}
+
+	log.Println("Proceso de creación de ZIP completado correctamente.")
 }
