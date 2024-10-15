@@ -65,6 +65,12 @@ func main() {
 		Handl.GetDiagnosticoHandler(w, r, database)
 	}).Methods("GET")
 
+	// Configurar las rutas
+	r.HandleFunc("/dataset/descarga", func(w http.ResponseWriter, r *http.Request) {
+		// Aquí se llamará al manejador
+		Handl.DatasetHandler(w, r, bucket, database)
+	}).Methods("GET")
+
 	// Aplicar el middleware de logging y CORS
 	r.Use(middleware.LoggingMiddleware) // Aplica LoggingMiddleware a todas las rutas
 	r.Use(middleware.CORSMiddleware)    // Aplica CORSMiddleware a todas las rutas

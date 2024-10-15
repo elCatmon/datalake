@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 	"time"
 
 	"io"
@@ -334,22 +336,39 @@ func GetDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Dat
 	json.NewEncoder(w).Encode(response)
 }
 
-func DatasetHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket) {
+// Endpoint para la descarga del dataset en formato ZIP
+func DatasetHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket, db *mongo.Database) {
+	// Inicializa tus variables necesarias
+	collection := db.Collection("estudios")
 	var estudios []models.EstudioDocument
 
-	// Decodificar el cuerpo de la solicitud
-	if err := json.NewDecoder(r.Body).Decode(&estudios); err != nil {
-		http.Error(w, "Error decodificando el JSON", http.StatusBadRequest)
+	// Buscar todos los estudios
+	cursor, err := collection.Find(context.Background(), bson.M{})
+	if err != nil {
+		log.Fatalf("Error buscando estudios: %v", err)
+	}
+	defer cursor.Close(context.Background())
+
+	if err := cursor.All(context.Background(), &estudios); err != nil {
+		log.Fatalf("Error al convertir cursor a lista: %v", err)
+	}
+	tipoArchivo := r.URL.Query().Get("type") // O "jpg", dependiendo de lo que necesites
+	rutaZip := fmt.Sprintf("./dataset/dataset_%s_%s.zip", tipoArchivo, time.Now().Format("20060102_150405"))
+	// Genera el archivo ZIP
+	services.RenombrarArchivosZip(estudios, bucket, rutaZip, tipoArchivo)
+
+	// Configura las cabeceras para la descarga
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", "attachment; filename="+rutaZip+"")
+
+	// Abre el archivo ZIP para lectura
+	file, err := os.Open(rutaZip)
+	if err != nil {
+		http.Error(w, "Error al abrir el archivo ZIP", http.StatusInternalServerError)
 		return
 	}
+	defer file.Close()
 
-	// Aquí llamamos a la función para renombrar archivos zip
-	rutaZip := "../archivos/estudios.zip" // Cambia esto a la ruta deseada
-	tipoArchivo := r.URL.Query().Get("type")
-
-	services.renombrarArchivosZip(estudios, bucket, rutaZip, tipoArchivo)
-
-	// Respuesta exitosa
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Archivos renombrados y zip creados correctamente."))
+	// Envía el archivo al cliente
+	http.ServeContent(w, r, rutaZip, time.Now(), file)
 }
