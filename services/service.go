@@ -19,7 +19,6 @@ import (
 	"path/filepath"
 	"time"
 	"webservice/config"
-	"webservice/dataset"
 	"webservice/models"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -618,10 +617,10 @@ func RenombrarArchivosZip(estudios []models.EstudioDocument, bucket *gridfs.Buck
 
 	zipWriter := zip.NewWriter(outFile)
 	defer zipWriter.Close()
-	dataset.CrearArchivosMetadata()
+	CrearArchivosMetadata()
 
 	// Añadir los archivos de metadata (README.txt fuera de 'metadata', nameconvention.txt dentro)
-	for _, file := range []string{"README.txt", "nameconvention.txt"} {
+	for _, file := range []string{"./dataset/README.txt", "./dataset/nameconvention.txt"} {
 		fileData, err := os.ReadFile(file)
 		if err != nil {
 			log.Fatalf("Error leyendo archivo %s: %v", file, err)
@@ -629,11 +628,11 @@ func RenombrarArchivosZip(estudios []models.EstudioDocument, bucket *gridfs.Buck
 
 		// Definir la ruta en el ZIP dependiendo del archivo
 		var zipPath string
-		if file == "nameconvention.txt" {
+		if file == "./dataset/nameconvention.txt" {
 			zipPath = "metadata/" + file // Dentro de 'metadata'
 		} else {
 
-			zipPath = file // Directamente en la raíz
+			zipPath = "./dataset/" + file // Directamente en la raíz
 		}
 
 		// Crear el archivo dentro del ZIP en la ruta correcta
@@ -658,10 +657,10 @@ func RenombrarArchivosZip(estudios []models.EstudioDocument, bucket *gridfs.Buck
 				var nuevoNombre string
 
 				if tipoArchivo == "dcm" && imagen.Dicom != (primitive.NilObjectID).Hex() {
-					nuevoNombre = dataset.GenerarNombreArchivo(imagen.Clave, serial) // Solo el nombre base
+					nuevoNombre = GenerarNombreArchivo(imagen.Clave, serial) // Solo el nombre base
 					pOID, _ := primitive.ObjectIDFromHex(imagen.Dicom)
 					// Obtener el archivo DICOM desde GridFS usando el _id almacenado en imagen.Dicom
-					archivoDicom, err := dataset.ObtenerArchivoDesdeGridFS(bucket, pOID)
+					archivoDicom, err := ObtenerArchivoDesdeGridFS(bucket, pOID)
 					if err != nil {
 						log.Printf("Error obteniendo archivo DICOM con ID %v: %v", imagen.Dicom, err)
 						continue
@@ -723,4 +722,24 @@ func RenombrarArchivosZip(estudios []models.EstudioDocument, bucket *gridfs.Buck
 
 	// Finalizar el archivo ZIP
 	log.Println("Proceso de creación de ZIP completado correctamente.")
+}
+
+// Función para eliminar todos los archivos en una carpeta
+func EliminarArchivosEnCarpeta(carpeta string) error {
+	// Lee todos los archivos en la carpeta
+	archivos, err := os.ReadDir(carpeta)
+	if err != nil {
+		return err
+	}
+
+	// Recorre todos los archivos y elimínalos
+	for _, archivo := range archivos {
+		rutaArchivo := filepath.Join(carpeta, archivo.Name())
+		err := os.Remove(rutaArchivo)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

@@ -1,4 +1,4 @@
-package dataset
+package services
 
 import (
 	"archive/zip"
@@ -87,14 +87,20 @@ Desglose del nombre:
 - Caracter _(12 - 16): identificador secuencial
 	`
 
-	// Guardar los archivos README.txt y nameconvention.txt usando el paquete `os`
-	if err := os.WriteFile("./README.txt", []byte(readme), 0644); err != nil {
+	// Asegúrate de que la carpeta `./dataset/` existe, si no, créala
+	if err := os.MkdirAll("./dataset/", 0755); err != nil {
 		return err
 	}
-	if err := os.WriteFile("./nameconvention.txt", []byte(nameconvention), 0644); err != nil {
+
+	// Guardar los archivos en la carpeta `./dataset/`
+	if err := os.WriteFile("./dataset/README.txt", []byte(readme), 0644); err != nil {
 		return err
 	}
-	log.Println("Archivos de metadata creados correctamente.")
+	if err := os.WriteFile("./dataset/nameconvention.txt", []byte(nameconvention), 0644); err != nil {
+		return err
+	}
+
+	log.Println("Archivos de metadata creados correctamente en ./dataset/")
 	return nil
 }
 
