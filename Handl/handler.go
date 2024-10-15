@@ -353,7 +353,15 @@ func DatasetHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 		log.Fatalf("Error al convertir cursor a lista: %v", err)
 	}
 	tipoArchivo := r.URL.Query().Get("type") // O "jpg", dependiendo de lo que necesites
-	rutaZip := fmt.Sprintf("./dataset/dataset_%s_%s.zip", tipoArchivo, time.Now().Format("20060102_150405"))
+	// Cambia esta línea:
+	rutaZip := fmt.Sprintf("dataset/dataset_%s_%s.zip", tipoArchivo, time.Now().Format("20060102_150405"))
+
+	// Asegúrate de que la carpeta './dataset/' existe
+	err = os.MkdirAll("./dataset", os.ModePerm)
+	if err != nil {
+		log.Fatalf("Error creando la carpeta ./dataset: %v", err)
+	}
+
 	// Genera el archivo ZIP
 	services.RenombrarArchivosZip(estudios, bucket, rutaZip, tipoArchivo)
 
