@@ -46,3 +46,4 @@ else if tipoArchivo == "jpg" && imagen.Imagen != (primitive.NilObjectID).Hex() {
 
 
 
+var ip string = "http://34.82.40.214:80"

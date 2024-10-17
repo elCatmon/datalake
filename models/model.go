@@ -8,26 +8,23 @@ import (
 
 // User representa un usuario en la base de datos.
 type User struct {
-	ID         string `json:"usuario_id"`
-	Nombre     string `json:"nombre"`
-	Correo     string `json:"correo"`
-	Contrasena string `json:"contrasena"`
+	ID         primitive.ObjectID `bson:"_id"`
+	Nombre     string             `bson:"nombre"`
+	Correo     string             `bson:"correo"`
+	Contrasena string             `bson:"contrasena"`
+	Rol        string             `bson:"rol"`
 }
 
 // FileDocument representa un documento en la colección `imagenes.files`.
 type FileDocument struct {
-	ID         primitive.ObjectID `bson:"_id"`
-	Filename   string             `bson:"filename"`
-	Length     int64              `bson:"length"`
-	ChunkSize  int                `bson:"chunkSize"`
-	UploadDate time.Time          `bson:"uploadDate"`
-}
-
-type Imagen struct {
-	Clave       string `bson:"clave"`
-	Dicom       string `bson:"dicom"`
-	Imagen      string `bson:"imagen"`
-	Anonimizada bool   `bson:"anonimizada"`
+	ID          primitive.ObjectID `bson:"_id"`
+	Filename    string             `bson:"filename"`
+	Length      int64              `bson:"length"`
+	ChunkSize   int                `bson:"chunkSize"`
+	UploadDate  time.Time          `bson:"uploadDate"`
+	EstudioID   string             `bson:"estudio_ID"`  // ID del estudio relacionado
+	Anonimizada bool               `bson:"anonimizada"` // Indica si el archivo ha sido anonimizado
+	Clave       string             `bson:"clave"`
 }
 
 type Diagnostico struct {
@@ -44,7 +41,6 @@ type EstudioDocument struct {
 	Donador     string             `bson:"donador"`
 	Hash        string             `bson:"hash"`
 	Status      int                `bson:"status"`
-	Imagenes    []Imagen           `bson:"imagenes"`
 	Diagnostico []Diagnostico      `bson:"diagnostico"`
 }
 

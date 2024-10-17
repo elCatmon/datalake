@@ -2,7 +2,6 @@ package Handl
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,47 +24,52 @@ import (
 )
 
 // RegisterHandler maneja la solicitud de registro de un nuevo usuario.
-func RegisterHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+func RegisterHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 	w.Header().Set("Content-Type", "application/json")
+
+	// Decodificar el JSON recibido en el cuerpo de la solicitud
 	var newUser models.User
 	err := json.NewDecoder(r.Body).Decode(&newUser)
 	if err != nil {
 		http.Error(w, `{"error": "Error al decodificar los datos"}`, http.StatusBadRequest)
 		return
 	}
+	// Verificar si el correo ya existe en la base de datos
 	exists, err := services.ExisteCorreo(db, newUser.Correo)
 	if err != nil {
 		http.Error(w, `{"error": "Error al verificar el correo"}`, http.StatusInternalServerError)
 		return
 	}
-
 	if exists {
+		// Si el correo ya existe, devolver un error
 		response := map[string]string{"error": "El correo ya está en uso"}
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(response)
 		return
 	}
-
+	// Generar un hash de la contraseña usando bcrypt
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newUser.Contrasena), bcrypt.DefaultCost)
 	if err != nil {
 		http.Error(w, `{"error": "Error al encriptar la contraseña"}`, http.StatusInternalServerError)
 		return
 	}
-
+	// Asignar el hash de la contraseña al nuevo usuario
 	newUser.Contrasena = string(hashedPassword)
+	// Registrar al usuario en MongoDB
 	err = services.RegistrarUsuario(db, newUser)
 	if err != nil {
 		http.Error(w, `{"error": "Error al registrar usuario"}`, http.StatusInternalServerError)
 		return
 	}
 
+	// Respuesta de éxito
 	response := map[string]string{"message": "Registro exitoso"}
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(response)
 }
 
 // LoginHandler maneja la solicitud de inicio de sesión del usuario.
-func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+func LoginHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 	var credentials models.User
 	err := json.NewDecoder(r.Body).Decode(&credentials)
 	if err != nil {
@@ -133,69 +137,58 @@ func ImageHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket)
 }
 
 func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
-	// Obtener la colección de estudios
 	studiesCollection := db.Collection("estudios")
-
-	// Obtener parámetros de consulta
 	queryParams := r.URL.Query()
 
 	// Parámetros de paginación
-	pageStr := queryParams.Get("page")
-	limitStr := queryParams.Get("limit")
-
-	// Parsear parámetros de página
-	page, err := strconv.Atoi(pageStr)
-	if err != nil || page < 1 {
-		page = 1 // Página por defecto si el parámetro es inválido
+	page := 1
+	if pageStr := queryParams.Get("page"); pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
 	}
 
-	// Parsear parámetros de límite
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 1 {
-		limit = 18 // Límite por defecto si el parámetro es inválido
+	limit := 18
+	if limitStr := queryParams.Get("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
 	}
 
-	// Crear filtro para los estudios
 	filter, err := services.CrearFiltro(w, r)
 	if err != nil {
-		http.Error(w, "Error al crear el filtro: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Buscar estudios
-	imageIDs, cursor, err := services.BuscarEstudios(w, studiesCollection, filter)
+	imageIDs, err := services.BuscarEstudios(w, studiesCollection, filter)
 	if err != nil {
-		return // Al hacer http.Error, simplemente retornamos
+		return
 	}
-	defer cursor.Close(context.Background()) // Cerrar el cursor después de su uso
 
-	// Si no hay IDs de imagen, devolver una lista vacía
 	if len(imageIDs) == 0 {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]string{}) // No es necesario usar http.Error aquí
+		json.NewEncoder(w).Encode([]string{})
 		return
 	}
 
 	// Aplicar paginación
 	start := (page - 1) * limit
-	end := start + limit
 	if start >= len(imageIDs) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]string{}) // No es necesario usar http.Error aquí
+		json.NewEncoder(w).Encode([]string{})
 		return
 	}
+	end := start + limit
 	if end > len(imageIDs) {
 		end = len(imageIDs)
 	}
 	paginatedImageIDs := imageIDs[start:end]
 
-	// Buscar imágenes
 	images, err := services.BuscarImagenes(w, paginatedImageIDs, db)
 	if err != nil {
-		return // Al hacer http.Error, simplemente retornamos
+		return
 	}
 
-	// Devolver la lista de URLs de las miniaturas
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(images); err != nil {
 		http.Error(w, "Error al escribir la respuesta: "+err.Error(), http.StatusInternalServerError)

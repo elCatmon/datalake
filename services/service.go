@@ -7,7 +7,6 @@ import (
 	"archive/zip"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -30,62 +29,89 @@ import (
 
 // Usuarios
 // Registra nuevas cuentas de usuario
-func RegistrarUsuario(db *sql.DB, user models.User) error {
-	query := `INSERT INTO users (nombre, correo, contrasena) VALUES ($1, $2, $3)`
-	_, err := db.Exec(query, user.Nombre, user.Correo, user.Contrasena)
+func RegistrarUsuario(db *mongo.Database, user models.User) error {
+	collection := db.Collection("usuarios")
+
+	// Log de inicio del registro
+	log.Printf("Intentando registrar usuario con correo: %s", user.Correo)
+
+	// Insertar el nuevo usuario en MongoDB
+	_, err := collection.InsertOne(context.TODO(), bson.M{
+		"nombre":     user.Nombre,
+		"correo":     user.Correo,
+		"contrasena": user.Contrasena,
+		"rol":        "consultor", // Asigna un rol al usuario
+	})
 	if err != nil {
+		log.Printf("Error al registrar usuario con correo %s: %v", user.Correo, err)
 		return fmt.Errorf("error al registrar usuario: %v", err)
 	}
 
+	// Log de éxito
+	log.Printf("Usuario registrado exitosamente con correo: %s", user.Correo)
 	return nil
 }
 
 // Valida que no existe un correo ya registrado al momento de crear una cuenta
-func ExisteCorreo(db *sql.DB, email string) (bool, error) {
-	var exists bool
-	query := "SELECT EXISTS(SELECT 1 FROM users WHERE correo=$1)"
-	err := db.QueryRow(query, email).Scan(&exists)
+func ExisteCorreo(db *mongo.Database, email string) (bool, error) {
+	collection := db.Collection("usuarios")
+
+	// Log de inicio de verificación
+	log.Printf("Verificando existencia de correo: %s", email)
+
+	// Buscar si existe un usuario con el correo proporcionado
+	count, err := collection.CountDocuments(context.TODO(), bson.M{"correo": email})
 	if err != nil {
-		return false, err
+		log.Printf("Error al verificar correo %s: %v", email, err)
+		return false, fmt.Errorf("error al verificar el correo: %v", err)
 	}
-	return exists, nil
+
+	// Log de resultado de la verificación
+	if count > 0 {
+		log.Printf("El correo %s ya está registrado", email)
+	} else {
+		log.Printf("El correo %s no está registrado", email)
+	}
+
+	// Si `count` es mayor que 0, significa que el correo ya existe
+	return count > 0, nil
 }
 
 // ValidarUsuario verifica las credenciales del usuario y devuelve el ID del usuario si son válidas.
-func ValidarUsuario(db *sql.DB, correo, contrasena string) (bool, string, error) {
-	var id string
-	var storedPassword string
+func ValidarUsuario(db *mongo.Database, correo, contrasena string) (bool, string, error) {
+	collection := db.Collection("usuarios")
+	var user models.User
 
-	// Consulta para obtener la contraseña almacenada y el ID del usuario
-	err := db.QueryRow("SELECT usuario_id, contrasena FROM users WHERE correo = $1", correo).Scan(&id, &storedPassword)
+	// Log de inicio de validación
+	log.Printf("Validando credenciales para el correo: %s", correo)
+
+	// Buscar al usuario por correo
+	err := collection.FindOne(context.TODO(), bson.M{"correo": correo}).Decode(&user)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if err == mongo.ErrNoDocuments {
 			// Usuario no encontrado
+			log.Printf("Usuario no encontrado con el correo: %s", correo)
 			return false, "", nil
 		}
-		// Otro error
-		return false, "", err
+		log.Printf("Error al buscar usuario con correo %s: %v", correo, err)
+		return false, "", fmt.Errorf("error al buscar usuario: %v", err)
 	}
 
 	// Verificar la contraseña usando bcrypt
-	err = bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(contrasena))
+	err = bcrypt.CompareHashAndPassword([]byte(user.Contrasena), []byte(contrasena))
 	if err != nil {
 		// Contraseña incorrecta
+		log.Printf("Contraseña incorrecta para el correo: %s", correo)
 		return false, "", nil
 	}
 
-	return true, id, nil
+	// Si todo es correcto, devuelve true y el ID del usuario
+	log.Printf("Credenciales válidas para el usuario con correo: %s", correo)
+	return true, user.ID.Hex(), nil
 }
 
 // generadores
 // HashPassword genera el hash de una contraseña utilizando bcrypt.
-func HashContraseña(password string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	return string(bytes), nil
-}
 
 // Función para generar un hash SHA-256
 func GenerateHash(donador, numOperacion string) string {
@@ -112,7 +138,7 @@ func getValueOrError(formData map[string][]string, key string) (string, error) {
 func EncontrarImagen(bucket *gridfs.Bucket, filename string) (*gridfs.DownloadStream, error) {
 	downloadStream, err := bucket.OpenDownloadStreamByName(filename)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error al abrir el stream de descarga para el archivo %s: %w", filename, err)
 	}
 	return downloadStream, nil
 }
@@ -123,115 +149,98 @@ func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
 	region := r.URL.Query().Get("region")
 	proyeccion := r.URL.Query().Get("proyeccion")
 
-	// Crear el filtro de búsqueda para estudios con los filtros obligatorios
-	filter := bson.M{
-		"imagenes": bson.M{
-			"$elemMatch": bson.M{
-				"anonimizada": true, // Filtro obligatorio: imagen anonimizada
-			},
-		},
-		"status": 1, // Filtro obligatorio: status activo
-	}
-
-	// Filtro obligatorio por tipo de estudio (primeros 2 dígitos de la clave)
-	if tipoEstudio != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^" + tipoEstudio, // Filtro por tipo de estudio
-		}
-	} else {
-		// Retornar error si el tipo de estudio no se especifica, ya que es obligatorio
+	// Filtro obligatorio
+	if tipoEstudio == "" {
 		return nil, fmt.Errorf("el campo tipoEstudio es obligatorio")
 	}
 
-	// Filtros opcionales
-	// Filtro por región (3to y 4to dígito de la clave)
-	if region != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{2}" + region, // Filtra por región si está presente
-		}
+	filter := bson.M{
+		"imagenes": bson.M{
+			"$elemMatch": bson.M{
+				"anonimizada": true, // Obligatorio
+			},
+		},
+		"status": 1, // Obligatorio
+		"imagenes.clave": bson.M{
+			"$regex": "^" + tipoEstudio,
+		},
 	}
 
-	// Filtro por proyección (8vo y 9no dígito de la clave)
-	if proyeccion != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{4}" + proyeccion, // Filtra por proyección si está presente
-		}
+	// Agregar filtros opcionales
+	if region != "" {
+		filter["imagenes.clave"].(bson.M)["$regex"] = "^.{2}" + region
 	}
+	if proyeccion != "" {
+		filter["imagenes.clave"].(bson.M)["$regex"] = "^.{4}" + proyeccion
+	}
+
 	return filter, nil
 }
 
 // Busca estudios aplicando el filtro
-func BuscarEstudios(w http.ResponseWriter, studiesCollection *mongo.Collection, filter bson.M) ([]primitive.ObjectID, *mongo.Cursor, error) {
-	// Buscar los estudios que cumplen con el filtro
+func BuscarEstudios(w http.ResponseWriter, studiesCollection *mongo.Collection, filter bson.M) ([]primitive.ObjectID, error) {
 	cursor, err := studiesCollection.Find(context.Background(), filter)
 	if err != nil {
-		http.Error(w, "Error al buscar estudios en la base de datos: "+err.Error(), http.StatusInternalServerError)
-		return nil, nil, err // Retornar error después de enviar la respuesta
+		http.Error(w, "Error al buscar estudios: "+err.Error(), http.StatusInternalServerError)
+		return nil, err
 	}
 	defer cursor.Close(context.Background())
 
-	// Recolectar IDs de imágenes que cumplen con los criterios
 	var imageIDs []primitive.ObjectID
+
 	for cursor.Next(context.Background()) {
 		var study models.EstudioDocument
 		if err := cursor.Decode(&study); err != nil {
 			http.Error(w, "Error al decodificar estudio: "+err.Error(), http.StatusInternalServerError)
-			return nil, nil, err // Retornar error después de enviar la respuesta
+			return nil, err
 		}
 
-		for _, img := range study.Imagenes {
-			if img.Anonimizada {
-				if img.Imagen == "" {
-					continue // Ignorar este ID y continuar con el siguiente
-				}
+		// Buscar las imágenes asociadas al estudio
+		imageFilter := bson.M{"estudio_ID": study.EstudioID, "anonimizada": true}
+		imageCursor, err := studiesCollection.Database().Collection("imagenes.files").Find(context.Background(), imageFilter)
+		if err != nil {
+			http.Error(w, "Error al buscar imágenes: "+err.Error(), http.StatusInternalServerError)
+			return nil, err
+		}
+		defer imageCursor.Close(context.Background())
 
-				if len(img.Imagen) != 24 {
-					continue // Ignorar este ID y continuar con el siguiente
-				}
-
-				imageID, err := primitive.ObjectIDFromHex(img.Imagen)
-				if err != nil {
-					continue // Ignorar este ID y continuar con el siguiente
-				}
-				imageIDs = append(imageIDs, imageID)
+		for imageCursor.Next(context.Background()) {
+			var file models.FileDocument
+			if err := imageCursor.Decode(&file); err != nil {
+				http.Error(w, "Error al decodificar imagen: "+err.Error(), http.StatusInternalServerError)
+				return nil, err
 			}
-
+			imageIDs = append(imageIDs, file.ID)
 		}
 	}
 
-	return imageIDs, cursor, nil
+	return imageIDs, nil
 }
 
 // Encuentra y regresa miniaturas de los estudios
 func BuscarImagenes(w http.ResponseWriter, imageIDs []primitive.ObjectID, db *mongo.Database) ([]string, error) {
-	// Obtener la colección de archivos GridFS
 	imagesCollection := db.Collection("imagenes.files")
-	// Filtrar archivos con IDs en imageIDs y que terminen en .jpg
 	filter := bson.M{
 		"_id":      bson.M{"$in": imageIDs},
 		"filename": bson.M{"$regex": `\.jpg$`},
 	}
 
-	// Buscar los archivos en la colección usando el filtro
 	cursor, err := imagesCollection.Find(context.Background(), filter)
 	if err != nil {
-		http.Error(w, "Error al buscar archivos en la base de datos: "+err.Error(), http.StatusInternalServerError)
-		return nil, err // Retornar error después de enviar la respuesta
+		http.Error(w, "Error al buscar archivos: "+err.Error(), http.StatusInternalServerError)
+		return nil, err
 	}
 	defer cursor.Close(context.Background())
 
 	var images []string
 	for cursor.Next(context.Background()) {
 		var fileInfo models.FileDocument
-		if err := cursor.Decode(&fileInfo); err != nil {
-			http.Error(w, "Error al decodificar archivo: "+err.Error(), http.StatusInternalServerError)
-			return nil, err // Retornar error después de enviar la respuesta
-		}
-		// Obtener el nombre del archivo y construir la URL
-		filename := fileInfo.Filename
-		if filename != "" {
-			imageURL := config.GetIP() + "/image/" + filename
+		if err := cursor.Decode(&fileInfo); err == nil && fileInfo.Filename != "" {
+			imageURL := config.GetIP() + "/image/" + fileInfo.Filename
 			images = append(images, imageURL)
+		} else if err != nil {
+			http.Error(w, "Error al decodificar archivo: "+err.Error(), http.StatusInternalServerError)
+			return nil, err
 		}
 	}
 	return images, nil
@@ -314,14 +323,33 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 		return fmt.Errorf("no se proporcionaron archivos")
 	}
 
-	var imagenes []models.Imagen
 	var anonymizedFiles []string
 	var jpgFiles []string
-	estudioID := primitive.NewObjectID().Hex()
-	donador := "DonadorEjemplo" // Valor ejemplo, reemplazar por el valor correcto
+
+	// Recopilar valores del formulario
+	estudioID := primitive.NewObjectID().Hex() // ID temporal para el estudio
+	donador, _ := getValueOrError(r.MultipartForm.Value, "donador")
 	estudio, _ := getValueOrError(r.MultipartForm.Value, "tipoEstudio")
-	clave := estudio + "00" + "00" + "0" + "0" + "1" + "0" + "0"
+	clave := estudio + "00" + "00" + "0" + "0" + "1" + "0" + "0" // Clave generada, ajustar según sea necesario
 	hash := GenerateHash(donador, estudio)
+
+	// Crear el documento del estudio
+	estudioDoc := models.EstudioDocument{
+		ID:          primitive.NewObjectID(),
+		EstudioID:   estudioID,
+		Donador:     donador,
+		Hash:        hash,
+		Status:      0,                      // Ajustar según el estado que corresponda
+		Diagnostico: []models.Diagnostico{}, // Aquí se pueden agregar diagnósticos si se proporcionan
+	}
+
+	// Guardar el estudio en la base de datos
+	estudioCollection := database.Collection("estudios")
+	_, err = estudioCollection.InsertOne(context.Background(), estudioDoc)
+	if err != nil {
+		http.Error(w, "Error al guardar el estudio", http.StatusInternalServerError)
+		return err
+	}
 
 	// Iterar sobre cada archivo enviado
 	for _, fileHeader := range files {
@@ -378,65 +406,74 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 			http.Error(w, "Fallo al subir a la base de datos los archivos originales", http.StatusInternalServerError)
 			continue
 		}
-		imagenes = append(imagenes, models.Imagen{
+
+		// Crear un documento para el archivo
+		fileDoc := models.FileDocument{
+			ID:          primitive.NewObjectID(),
+			Filename:    fileHeader.Filename,
+			Length:      fileHeader.Size,
+			ChunkSize:   1024 * 255, // Tamaño de chunk por defecto
+			UploadDate:  time.Now(),
+			EstudioID:   estudioID, // Usar el ID del estudio relacionado
+			Anonimizada: true,
 			Clave:       clave,
-			Dicom:       fileID,
-			Imagen:      "",
-			Anonimizada: false,
-		})
-	}
+		}
 
-	// Subir archivos anonimizados y JPG a GridFS
-	for i := range anonymizedFiles {
-		fileID := subirArchivoDigitalGridFS(anonymizedFiles[i], bucket)
-		jpgID := subirArchivoDigitalGridFS(jpgFiles[i], bucket)
-
-		if fileID == "" || jpgID == "" {
-			http.Error(w, "Fallo al subir a la base de datos los archivos anonimizados", http.StatusInternalServerError)
+		// Insertar el documento en la colección `imagenes.files`
+		_, err = database.Collection("imagenes.files").InsertOne(context.Background(), fileDoc)
+		if err != nil {
+			http.Error(w, "Error al guardar el documento del archivo", http.StatusInternalServerError)
 			continue
 		}
-		imagenes = append(imagenes, models.Imagen{
-			Clave:       clave,
-			Dicom:       fileID,
-			Imagen:      jpgID,
-			Anonimizada: true,
-		})
 	}
 
-	// Crear el documento del estudio
-	estudioDoc := models.EstudioDocument{
-		EstudioID: estudioID,
-		Donador:   donador,
-		Hash:      hash,
-		Status:    0,
-		Imagenes:  imagenes,
-		Diagnostico: []models.Diagnostico{
-			{
-				Hallazgos:     "",
-				Impresion:     "",
-				Observaciones: "",
-				Fecha:         time.Now(),
-				Medico:        "",
-			},
-		},
-	}
-
-	// Insertar el documento en MongoDB
-	collection := database.Collection("estudios")
-	_, err = collection.InsertOne(context.Background(), estudioDoc)
-	if err != nil {
-		http.Error(w, "Fallo al insertar el documento", http.StatusInternalServerError)
-		return err
-	}
-
-	// Eliminar archivos temporales
-	for _, path := range append(anonymizedFiles, jpgFiles...) {
-		if err := os.Remove(path); err != nil {
-		}
-	}
+	// Responder con éxito
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Todos los archivos han sido procesados exitosamente y el estudio ha sido registrado."))
 	return nil
+}
+
+// BuscarEstudioIDImagenNombre busca el _id del estudio que contiene una imagen por su nombre.
+func BuscarEstudioIDImagen(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
+	// Buscando la imagen en la colección de archivos (imagenes.files)
+	fileCollection := db.Collection("imagenes.files")
+	fileFilter := bson.M{"filename": imagenNombre}
+	var fileDoc models.FileDocument
+	err := fileCollection.FindOne(context.Background(), fileFilter).Decode(&fileDoc)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return primitive.ObjectID{}, fmt.Errorf("no se encontró la imagen con el nombre: %s", imagenNombre)
+		}
+		return primitive.ObjectID{}, fmt.Errorf("error al buscar la imagen: %v", err)
+	}
+	// Buscando el estudio utilizando el ID de la imagen (como cadena de texto)
+	studyCollection := db.Collection("estudios")
+	studyFilter := bson.M{"imagenes.dicom": fileDoc.ID.Hex()} // Convertir el ObjectID a su representación hexadecimal (cadena)
+	var estudio models.EstudioDocument
+	err = studyCollection.FindOne(context.Background(), studyFilter).Decode(&estudio)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return primitive.ObjectID{}, fmt.Errorf("no se encontró el estudio que contiene la imagen")
+		}
+		return primitive.ObjectID{}, fmt.Errorf("error al buscar el estudio: %v", err)
+	}
+	return estudio.ID, nil
+}
+
+// BuscarEstudioIDImagenNombre busca el _id del estudio que contiene una imagen por su nombre para actualizar el diagnostico.
+func BuscarImagenEstudioNombre(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
+	// Buscando la imagen en la colección de archivos (imagenes.files)
+	fileCollection := db.Collection("imagenes.files")
+	fileFilter := bson.M{"filename": imagenNombre}
+	var fileDoc models.FileDocument
+	err := fileCollection.FindOne(context.Background(), fileFilter).Decode(&fileDoc)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return primitive.ObjectID{}, fmt.Errorf("no se encontró la imagen con el nombre: %s", imagenNombre)
+		}
+		return primitive.ObjectID{}, fmt.Errorf("error al buscar la imagen: %v", err)
+	}
+	// Devolver el ID de la imagen encontrada
+	return fileDoc.ID, nil
 }
 
 func ActualizarDiagnosticoYClave(studyID string, imagenNombre string, diagnostico models.Diagnostico, nuevaClave string, db *mongo.Database) error {
@@ -487,50 +524,6 @@ func ActualizarDiagnosticoYClave(studyID string, imagenNombre string, diagnostic
 		return fmt.Errorf("no se encontró el estudio o no se actualizó el diagnóstico y la clave")
 	}
 	return nil
-}
-
-// BuscarEstudioIDImagenNombre busca el _id del estudio que contiene una imagen por su nombre.
-func BuscarEstudioIDImagen(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
-	// Buscando la imagen en la colección de archivos (imagenes.files)
-	fileCollection := db.Collection("imagenes.files")
-	fileFilter := bson.M{"filename": imagenNombre}
-	var fileDoc models.FileDocument
-	err := fileCollection.FindOne(context.Background(), fileFilter).Decode(&fileDoc)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return primitive.ObjectID{}, fmt.Errorf("no se encontró la imagen con el nombre: %s", imagenNombre)
-		}
-		return primitive.ObjectID{}, fmt.Errorf("error al buscar la imagen: %v", err)
-	}
-	// Buscando el estudio utilizando el ID de la imagen (como cadena de texto)
-	studyCollection := db.Collection("estudios")
-	studyFilter := bson.M{"imagenes.dicom": fileDoc.ID.Hex()} // Convertir el ObjectID a su representación hexadecimal (cadena)
-	var estudio models.EstudioDocument
-	err = studyCollection.FindOne(context.Background(), studyFilter).Decode(&estudio)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return primitive.ObjectID{}, fmt.Errorf("no se encontró el estudio que contiene la imagen")
-		}
-		return primitive.ObjectID{}, fmt.Errorf("error al buscar el estudio: %v", err)
-	}
-	return estudio.ID, nil
-}
-
-// BuscarEstudioIDImagenNombre busca el _id del estudio que contiene una imagen por su nombre para actualizar el diagnostico.
-func BuscarImagenEstudioNombre(imagenNombre string, db *mongo.Database) (primitive.ObjectID, error) {
-	// Buscando la imagen en la colección de archivos (imagenes.files)
-	fileCollection := db.Collection("imagenes.files")
-	fileFilter := bson.M{"filename": imagenNombre}
-	var fileDoc models.FileDocument
-	err := fileCollection.FindOne(context.Background(), fileFilter).Decode(&fileDoc)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return primitive.ObjectID{}, fmt.Errorf("no se encontró la imagen con el nombre: %s", imagenNombre)
-		}
-		return primitive.ObjectID{}, fmt.Errorf("error al buscar la imagen: %v", err)
-	}
-	// Devolver el ID de la imagen encontrada
-	return fileDoc.ID, nil
 }
 
 // BuscarDiagnosticoReciente busca el diagnóstico más reciente de un estudio dado su _id y el nombre de la imagen

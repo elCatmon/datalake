@@ -3,13 +3,16 @@ package services
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/gridfs"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // Función para subir archivos a GridFS
@@ -36,6 +39,28 @@ func subirArchivoDigitalGridFS(filePath string, bucket *gridfs.Bucket) string {
 
 	// Obtener el ID del archivo subido
 	fileID := uploadStream.FileID.(primitive.ObjectID)
+	return fileID.Hex()
+}
+
+func SubirArchivoConMetadatos(filePath string, bucket *gridfs.Bucket, estudioID string, anonimizada bool) string {
+	file, err := os.Open(filePath)
+	if err != nil {
+		log.Printf("Error al abrir el archivo: %v", err)
+		return ""
+	}
+	defer file.Close()
+
+	uploadOpts := options.GridFSUpload().SetMetadata(bson.M{
+		"estudio_ID":  estudioID,
+		"anonimizada": anonimizada,
+	})
+
+	fileID, err := bucket.UploadFromStream(filepath.Base(filePath), file, uploadOpts)
+	if err != nil {
+		log.Printf("Error al subir archivo a GridFS: %v", err)
+		return ""
+	}
+
 	return fileID.Hex()
 }
 

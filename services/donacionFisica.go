@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"time"
 	"webservice/models"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -17,27 +18,54 @@ import (
 )
 
 // Sube información de la donación física anonimizada con conversión de archivos JPG
+// Sube información de la donación física anonimizada con conversión de archivos JPG
 func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gridfs.Bucket, r *http.Request, database *mongo.Database) {
 	estudioID, _ := datos[0].(string)
 	donador, _ := datos[1].(string)
-	estudio, _ := datos[2].(string)
-	hash, _ := datos[3].(string)
-	region, _ := datos[4].(string)
-	valida, _ := datos[5].(string)
-	sexo, _ := datos[6].(string)
-	edad, _ := datos[7].(string)
-	anonymizedFiles, _ := datos[8].([]*multipart.FileHeader)
-	originalFiles, _ := datos[9].([]*multipart.FileHeader)
+	hash, _ := datos[2].(string)
+	region, _ := datos[3].(string)
+	valida, _ := datos[4].(string)
+	sexo, _ := datos[5].(string)
+	edad, _ := datos[6].(string)
+	anonymizedFiles, _ := datos[7].([]*multipart.FileHeader)
+	originalFiles, _ := datos[8].([]*multipart.FileHeader)
 
 	// Clave única del estudio
-	clave := estudio + region + "00" + valida + "0" + "1" + sexo + edad
+	clave := estudioID + region + "00" + valida + "0" + "1" + sexo + edad
 
 	if len(originalFiles) == 0 || len(anonymizedFiles) == 0 {
 		http.Error(w, "Debe haber archivos originales y anonimizados", http.StatusBadRequest)
 		return
 	}
 
-	var imagenes []models.Imagen
+	// Crear documento del estudio
+	estudioDoc := models.EstudioDocument{
+		ID:        primitive.NewObjectID(),
+		EstudioID: estudioID,
+		Donador:   donador,
+		Hash:      hash,
+		Status:    1,
+		Diagnostico: []models.Diagnostico{
+			{
+				Hallazgos:     "",
+				Impresion:     "",
+				Observaciones: "",
+			},
+		},
+	}
+
+	// Insertar el documento en la base de datos
+	collection := database.Collection("estudios")
+	insertResult, err := collection.InsertOne(r.Context(), estudioDoc)
+	if err != nil {
+		http.Error(w, "Error al insertar documento del estudio", http.StatusInternalServerError)
+		return
+	}
+
+	// Obtener el ID del estudio insertado
+	estudioIDInserted := insertResult.InsertedID.(primitive.ObjectID)
+
+	var imagenes []models.FileDocument // Cambié a la estructura correcta
 
 	// Subir archivos anonimizados
 	for _, fileHeader := range anonymizedFiles {
@@ -73,19 +101,23 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 		}
 
 		// Limpiar archivos temporales
-		defer os.Remove(tempFilePath)
+		defer os.Remove(jpgFilePath)
 		defer os.Remove(dcmFilePath)
 
 		// Guardar los detalles de la imagen
-		imagenes = append(imagenes, models.Imagen{
-			Clave:       clave,
-			Dicom:       dcmID,
-			Imagen:      fileID,
+		imagenes = append(imagenes, models.FileDocument{
+			ID:          primitive.NewObjectID(), // Asumiendo que fileID es de tipo primitive.ObjectID
+			Filename:    fileHeader.Filename,
+			Length:      fileHeader.Size,
+			ChunkSize:   1024, // Ajusta el tamaño del chunk según tus necesidades
+			UploadDate:  time.Now(),
+			EstudioID:   estudioIDInserted.Hex(), // Guardar el ID del estudio insertado
 			Anonimizada: true,
+			Clave:       clave,
 		})
 	}
 
-	// Subir archivos original (sin conversión)
+	// Subir archivos originales (sin conversión)
 	for _, fileHeader := range originalFiles {
 		// Crear una ruta temporal para el archivo
 		OtempFilePath := fmt.Sprintf("./archivos/%s", fileHeader.Filename)
@@ -119,36 +151,33 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 		defer os.Remove(OtempFilePath)
 		defer os.Remove(OdcmFilePath)
 
-		imagenes = append(imagenes, models.Imagen{
-			Clave:       clave,
-			Dicom:       OdcmID,
-			Imagen:      fileID,
+		imagenes = append(imagenes, models.FileDocument{
+			ID:          primitive.NewObjectID(), // Asumiendo que fileID es de tipo primitive.ObjectID
+			Filename:    fileHeader.Filename,
+			Length:      fileHeader.Size,
+			ChunkSize:   1024, // Ajusta el tamaño del chunk según tus necesidades
+			UploadDate:  time.Now(),
+			EstudioID:   estudioIDInserted.Hex(), // Guardar el ID del estudio insertado
 			Anonimizada: false,
+			Clave:       clave,
 		})
 	}
 
-	// Crear documento del estudio
-	estudioDoc := models.EstudioDocument{
-		ID:        primitive.NewObjectID(),
-		EstudioID: estudioID,
-		Donador:   donador,
-		Hash:      hash,
-		Status:    1,
-		Imagenes:  imagenes,
-		Diagnostico: []models.Diagnostico{
-			{
-				Hallazgos:     "",
-				Impresion:     "",
-				Observaciones: "",
-			},
-		},
+	// Guardar las imágenes en la base de datos si se necesita
+	if len(imagenes) > 0 {
+		imagenesCollection := database.Collection("imagenes")
+		for _, img := range imagenes {
+			_, err = imagenesCollection.InsertOne(r.Context(), img)
+			if err != nil {
+				http.Error(w, "Error al insertar imagen en la colección", http.StatusInternalServerError)
+				return
+			}
+		}
 	}
-	// Insertar el documento en la base de datos
-	collection := database.Collection("estudios")
-	if _, err := collection.InsertOne(r.Context(), estudioDoc); err != nil {
-		http.Error(w, "Error al insertar documento", http.StatusInternalServerError)
-		return
-	}
+
+	// Respuesta exitosa
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "Donación física subida con éxito")
 }
 
 // Guardar archivo temporalmente
@@ -213,7 +242,6 @@ func convertirArchivoJPG(tempFilePath, jpgFilePath string) error {
 	return nil
 }
 
-// Función para subir archivos a GridFS
 func subirArchivoGridFS(fileHeader *multipart.FileHeader, bucket *gridfs.Bucket) (string, error) {
 	file, err := fileHeader.Open()
 	if err != nil {

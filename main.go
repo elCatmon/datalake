@@ -26,11 +26,11 @@ func main() {
 
 	// Definir las rutas
 	r.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-		Handl.RegisterHandler(w, r, db)
+		Handl.RegisterHandler(w, r, database)
 	}).Methods("POST")
 
 	r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		Handl.LoginHandler(w, r, db)
+		Handl.LoginHandler(w, r, database)
 	}).Methods("POST")
 
 	r.HandleFunc("/donacion", func(w http.ResponseWriter, r *http.Request) {
