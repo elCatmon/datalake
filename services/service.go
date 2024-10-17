@@ -7,7 +7,6 @@ import (
 	"archive/zip"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -30,51 +29,85 @@ import (
 
 // Usuarios
 // Registra nuevas cuentas de usuario
-func RegistrarUsuario(db *sql.DB, user models.User) error {
-	query := `INSERT INTO users (nombre, correo, contrasena) VALUES ($1, $2, $3)`
-	_, err := db.Exec(query, user.Nombre, user.Correo, user.Contrasena)
+func RegistrarUsuario(db *mongo.Database, user models.User) error {
+	collection := db.Collection("usuarios")
+
+	// Log de inicio del registro
+	log.Printf("Intentando registrar usuario con correo: %s", user.Correo)
+
+	// Insertar el nuevo usuario en MongoDB
+	_, err := collection.InsertOne(context.TODO(), bson.M{
+		"nombre":     user.Nombre,
+		"correo":     user.Correo,
+		"contrasena": user.Contrasena,
+		"rol":        "consultor", // Asigna un rol al usuario
+	})
 	if err != nil {
+		log.Printf("Error al registrar usuario con correo %s: %v", user.Correo, err)
 		return fmt.Errorf("error al registrar usuario: %v", err)
 	}
 
+	// Log de éxito
+	log.Printf("Usuario registrado exitosamente con correo: %s", user.Correo)
 	return nil
 }
 
 // Valida que no existe un correo ya registrado al momento de crear una cuenta
-func ExisteCorreo(db *sql.DB, email string) (bool, error) {
-	var exists bool
-	query := "SELECT EXISTS(SELECT 1 FROM users WHERE correo=$1)"
-	err := db.QueryRow(query, email).Scan(&exists)
+func ExisteCorreo(db *mongo.Database, email string) (bool, error) {
+	collection := db.Collection("usuarios")
+
+	// Log de inicio de verificación
+	log.Printf("Verificando existencia de correo: %s", email)
+
+	// Buscar si existe un usuario con el correo proporcionado
+	count, err := collection.CountDocuments(context.TODO(), bson.M{"correo": email})
 	if err != nil {
-		return false, err
+		log.Printf("Error al verificar correo %s: %v", email, err)
+		return false, fmt.Errorf("error al verificar el correo: %v", err)
 	}
-	return exists, nil
+
+	// Log de resultado de la verificación
+	if count > 0 {
+		log.Printf("El correo %s ya está registrado", email)
+	} else {
+		log.Printf("El correo %s no está registrado", email)
+	}
+
+	// Si `count` es mayor que 0, significa que el correo ya existe
+	return count > 0, nil
 }
 
 // ValidarUsuario verifica las credenciales del usuario y devuelve el ID del usuario si son válidas.
-func ValidarUsuario(db *sql.DB, correo, contrasena string) (bool, string, error) {
-	var id string
-	var storedPassword string
+func ValidarUsuario(db *mongo.Database, correo, contrasena string) (bool, string, error) {
+	collection := db.Collection("usuarios")
+	var user models.User
 
-	// Consulta para obtener la contraseña almacenada y el ID del usuario
-	err := db.QueryRow("SELECT usuario_id, contrasena FROM users WHERE correo = $1", correo).Scan(&id, &storedPassword)
+	// Log de inicio de validación
+	log.Printf("Validando credenciales para el correo: %s", correo)
+
+	// Buscar al usuario por correo
+	err := collection.FindOne(context.TODO(), bson.M{"correo": correo}).Decode(&user)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if err == mongo.ErrNoDocuments {
 			// Usuario no encontrado
+			log.Printf("Usuario no encontrado con el correo: %s", correo)
 			return false, "", nil
 		}
-		// Otro error
-		return false, "", err
+		log.Printf("Error al buscar usuario con correo %s: %v", correo, err)
+		return false, "", fmt.Errorf("error al buscar usuario: %v", err)
 	}
 
 	// Verificar la contraseña usando bcrypt
-	err = bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(contrasena))
+	err = bcrypt.CompareHashAndPassword([]byte(user.Contrasena), []byte(contrasena))
 	if err != nil {
 		// Contraseña incorrecta
+		log.Printf("Contraseña incorrecta para el correo: %s", correo)
 		return false, "", nil
 	}
 
-	return true, id, nil
+	// Si todo es correcto, devuelve true y el ID del usuario
+	log.Printf("Credenciales válidas para el usuario con correo: %s", correo)
+	return true, user.ID.Hex(), nil
 }
 
 // generadores

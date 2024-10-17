@@ -2,7 +2,6 @@ package Handl
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,7 +24,7 @@ import (
 )
 
 // RegisterHandler maneja la solicitud de registro de un nuevo usuario.
-func RegisterHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+func RegisterHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 	w.Header().Set("Content-Type", "application/json")
 	var newUser models.User
 	err := json.NewDecoder(r.Body).Decode(&newUser)
@@ -65,7 +64,7 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 }
 
 // LoginHandler maneja la solicitud de inicio de sesión del usuario.
-func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+func LoginHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 	var credentials models.User
 	err := json.NewDecoder(r.Body).Decode(&credentials)
 	if err != nil {

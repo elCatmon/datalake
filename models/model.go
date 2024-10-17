@@ -8,10 +8,11 @@ import (
 
 // User representa un usuario en la base de datos.
 type User struct {
-	ID         string `json:"usuario_id"`
-	Nombre     string `json:"nombre"`
-	Correo     string `json:"correo"`
-	Contrasena string `json:"contrasena"`
+	ID         primitive.ObjectID `bson:"_id"`
+	Nombre     string             `bson:"nombre"`
+	Correo     string             `bson:"correo"`
+	Contrasena string             `bson:"contrasena"`
+	Rol        string             `bson:"rol"`
 }
 
 // FileDocument representa un documento en la colección `imagenes.files`.
