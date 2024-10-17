@@ -15,11 +15,15 @@ import (
 
 func main() {
 	// Inicializar la base de datos y el cliente MongoDB
-	db := config.InitializeDatabase()
-	defer db.Close()
 
 	client, database, bucket := config.InitializeMongoDBClient()
-	defer client.Disconnect(context.Background())
+	defer func() {
+		log.Println("Desconectando de MongoDB...")
+		if err := client.Disconnect(context.TODO()); err != nil {
+			log.Fatalf("Error al desconectar de MongoDB: %v", err)
+		}
+		log.Println("Desconexión de MongoDB exitosa.")
+	}()
 
 	// Crear un enrutador y configurar rutas
 	r := mux.NewRouter()
