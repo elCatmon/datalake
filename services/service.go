@@ -4,16 +4,18 @@ package services
 
 // Importacion de librerias
 import (
+	"archive/zip"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 	"webservice/config"
 	"webservice/models"
@@ -27,65 +29,215 @@ import (
 
 // Usuarios
 // Registra nuevas cuentas de usuario
-func RegistrarUsuario(db *sql.DB, user models.User) error {
-	query := `INSERT INTO users (nombre, correo, contrasena) VALUES ($1, $2, $3)`
-	_, err := db.Exec(query, user.Nombre, user.Correo, user.Contrasena)
+func RegistrarUsuario(db *mongo.Database, user models.User) (err error) {
+	// Uso de defer para recuperar de cualquier pánico
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recuperado de pánico al registrar usuario: %v", r)
+			err = fmt.Errorf("error inesperado al registrar usuario")
+		}
+	}()
+
+	// Log de inicio del registro
+	log.Printf("Intentando registrar usuario con correo: %s", user.Correo)
+
+	collection := db.Collection("usuarios")
+
+	// Validación de datos del usuario (puedes agregar más validaciones)
+	if user.Nombre == "" || user.Correo == "" || user.Contrasena == "" {
+		log.Printf("Datos incompletos para registrar usuario: %+v", user)
+		return fmt.Errorf("datos incompletos para registrar usuario")
+	}
+
+	// Manejo de error en la inserción
+	_, err = collection.InsertOne(context.TODO(), bson.M{
+		"nombre":     user.Nombre,
+		"correo":     user.Correo,
+		"contrasena": user.Contrasena,
+		"rol":        "consultor", // Asigna un rol al usuario
+	})
 	if err != nil {
+		log.Printf("Error al registrar usuario con correo %s: %v", user.Correo, err)
 		return fmt.Errorf("error al registrar usuario: %v", err)
 	}
 
+	// Log de éxito
+	log.Printf("Usuario registrado exitosamente con correo: %s", user.Correo)
 	return nil
 }
 
 // Valida que no existe un correo ya registrado al momento de crear una cuenta
-func ExisteCorreo(db *sql.DB, email string) (bool, error) {
-	var exists bool
-	query := "SELECT EXISTS(SELECT 1 FROM users WHERE correo=$1)"
-	err := db.QueryRow(query, email).Scan(&exists)
-	if err != nil {
-		return false, err
+func ExisteCorreo(db *mongo.Database, email string) (bool, error) {
+	collection := db.Collection("usuarios")
+
+	// Uso de defer para recuperar de cualquier pánico
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recuperado de pánico al verificar correo: %v", r)
+		}
+	}()
+
+	// Log de inicio de verificación
+	log.Printf("Verificando existencia de correo: %s", email)
+
+	// Validación de entrada
+	if email == "" {
+		log.Printf("El correo proporcionado está vacío")
+		return false, fmt.Errorf("el correo proporcionado está vacío")
 	}
-	return exists, nil
+
+	// Buscar si existe un usuario con el correo proporcionado
+	count, err := collection.CountDocuments(context.TODO(), bson.M{"correo": email})
+	if err != nil {
+		log.Printf("Error al verificar correo %s: %v", email, err)
+		return false, fmt.Errorf("error al verificar el correo: %v", err)
+	}
+
+	// Log de resultado de la verificación
+	if count > 0 {
+		log.Printf("El correo %s ya está registrado", email)
+	} else {
+		log.Printf("El correo %s no está registrado", email)
+	}
+
+	// Si `count` es mayor que 0, significa que el correo ya existe
+	return count > 0, nil
 }
 
 // ValidarUsuario verifica las credenciales del usuario y devuelve el ID del usuario si son válidas.
-func ValidarUsuario(db *sql.DB, correo, contrasena string) (bool, string, error) {
-	var id string
-	var storedPassword string
+func ValidarUsuario(db *mongo.Database, correo, contrasena string) (bool, string, error) {
+	collection := db.Collection("usuarios")
+	var user models.User
 
-	// Consulta para obtener la contraseña almacenada y el ID del usuario
-	err := db.QueryRow("SELECT usuario_id, contrasena FROM users WHERE correo = $1", correo).Scan(&id, &storedPassword)
+	// Uso de defer para recuperar de cualquier pánico
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recuperado de pánico al validar usuario: %v", r)
+		}
+	}()
+
+	// Log de inicio de validación
+	log.Printf("Validando credenciales para el correo: %s", correo)
+
+	// Validación de entrada
+	if correo == "" || contrasena == "" {
+		log.Printf("Correo o contraseña vacíos")
+		return false, "", fmt.Errorf("correo o contraseña vacíos")
+	}
+
+	// Buscar al usuario por correo
+	err := collection.FindOne(context.TODO(), bson.M{"correo": correo}).Decode(&user)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if err == mongo.ErrNoDocuments {
 			// Usuario no encontrado
+			log.Printf("Usuario no encontrado con el correo: %s", correo)
 			return false, "", nil
 		}
-		// Otro error
-		return false, "", err
+		log.Printf("Error al buscar usuario con correo %s: %v", correo, err)
+		return false, "", fmt.Errorf("error al buscar usuario: %v", err)
 	}
 
 	// Verificar la contraseña usando bcrypt
-	err = bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(contrasena))
+	err = bcrypt.CompareHashAndPassword([]byte(user.Contrasena), []byte(contrasena))
 	if err != nil {
 		// Contraseña incorrecta
+		log.Printf("Contraseña incorrecta para el correo: %s", correo)
 		return false, "", nil
 	}
 
-	return true, id, nil
+	// Si todo es correcto, devuelve true y el ID del usuario
+	log.Printf("Credenciales válidas para el usuario con correo: %s", correo)
+	return true, user.ID.Hex(), nil
+}
+
+// Cambiar la contraseña del usuario
+func ChangePassword(db *mongo.Database, email, currentPassword, newPassword string) error {
+	// Uso de defer para recuperar de cualquier pánico
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recuperado de pánico al cambiar la contraseña: %v", r)
+		}
+	}()
+
+	// Validación de entrada
+	if email == "" || currentPassword == "" || newPassword == "" {
+		log.Printf("Email, contraseña actual o nueva contraseña vacíos")
+		return fmt.Errorf("email, contraseña actual o nueva contraseña vacíos")
+	}
+
+	// Verificar si el correo electrónico existe
+	exists, err := ExisteCorreo(db, email)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		log.Printf("Correo no encontrado: %s", email)
+		return errors.New("correo no encontrado")
+	}
+
+	// Validar las credenciales del usuario
+	valid, _, err := ValidarUsuario(db, email, currentPassword)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		log.Printf("La contraseña actual es incorrecta para el correo: %s", email)
+		return errors.New("la contraseña actual es incorrecta")
+	}
+
+	// Hashear la nueva contraseña
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("Error al hashear la nueva contraseña: %v", err)
+		return errors.New("error al cambiar la contraseña")
+	}
+
+	// Actualizar la contraseña en la base de datos
+	collection := db.Collection("usuarios")
+	_, err = collection.UpdateOne(context.TODO(), bson.M{"correo": email}, bson.M{"$set": bson.M{"contrasena": hashedPassword}})
+	if err != nil {
+		log.Printf("Error al actualizar la contraseña para el usuario con correo %s: %v", email, err)
+		return errors.New("error al cambiar la contraseña")
+	}
+
+	log.Printf("Contraseña cambiada exitosamente para el usuario con correo: %s", email)
+	return nil
 }
 
 // generadores
-// HashPassword genera el hash de una contraseña utilizando bcrypt.
+// HashContraseña genera el hash de una contraseña utilizando bcrypt.
 func HashContraseña(password string) (string, error) {
+	// Validación de entrada
+	if password == "" {
+		log.Printf("La contraseña está vacía")
+		return "", fmt.Errorf("la contraseña está vacía")
+	}
+
+	// Uso de defer para recuperar de cualquier pánico
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recuperado de pánico al hashear la contraseña: %v", r)
+		}
+	}()
+
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return "", err
+		log.Printf("Error al hashear la contraseña: %v", err)
+		return "", fmt.Errorf("error al hashear la contraseña: %v", err)
 	}
 	return string(bytes), nil
 }
 
 // Función para generar un hash SHA-256
+// Función para generar un hash SHA-256
 func GenerateHash(donador, numOperacion string) string {
+	// Uso de defer para recuperar de cualquier pánico
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recuperado de pánico al generar hash: %v", r)
+		}
+	}()
+
 	hashInput := donador + numOperacion
 	hash := sha256.New()
 	hash.Write([]byte(hashInput))
@@ -601,4 +753,95 @@ func GetImageKeyByFileName(filename string, db *mongo.Database) (string, error) 
 	}
 
 	return "", errors.New("clave no encontrada para la imagen")
+}
+
+// Función para renombrar archivos y escribir en ZIP de manera paralelizada
+func GenerarDataset(estudios []models.EstudioDocument, bucket *gridfs.Bucket, zipWriter *zip.Writer, tipoArchivo string) error {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	serial := 1
+	const maxConcurrency = 10 // Número máximo de goroutines concurrentes
+	semaphore := make(chan struct{}, maxConcurrency)
+
+	log.Println("Iniciando proceso para renombrar archivos y escribir en ZIP...")
+
+	// Mapa para almacenar los metadatos por carpeta
+	metadatosPorCarpeta := make(map[string][]models.ImagenMetadata)
+
+	for _, estudio := range estudios {
+		for _, imagen := range estudio.Imagenes {
+			if imagen.Anonimizada && tipoArchivo == "dcm" && imagen.Dicom != primitive.NilObjectID.Hex() {
+				nuevoNombre := GenerarNombreArchivo(imagen.Clave, serial)
+				carpeta := nuevoNombre[:4] // Obtener la carpeta del nuevo nombre
+				pOID, err := primitive.ObjectIDFromHex(imagen.Dicom)
+				if err != nil {
+					log.Printf("Error al convertir Dicom ID %v: %v", imagen.Dicom, err)
+					continue
+				}
+
+				wg.Add(1)
+				semaphore <- struct{}{}
+				go func(nuevoNombre, carpeta string, pOID primitive.ObjectID) {
+					defer wg.Done()
+					defer func() { <-semaphore }()
+
+					archivoChan := make(chan []byte)
+					errChan := make(chan error)
+
+					// Llamar a la función para obtener el archivo desde GridFS en paralelo
+					go ObtenerArchivoDesdeGridFSDirecto(bucket, pOID, archivoChan, errChan)
+
+					select {
+					case archivoDicom := <-archivoChan:
+						// Escribir el archivo en el ZIP de manera segura
+						mu.Lock()
+						defer mu.Unlock()
+
+						rutaArchivo := fmt.Sprintf("imagenes/%s/%s.dcm", carpeta, nuevoNombre)
+						w, err := zipWriter.Create(rutaArchivo)
+						if err != nil {
+							log.Printf("Error creando archivo %s en el ZIP: %v", rutaArchivo, err)
+							return
+						}
+						if _, err := w.Write(archivoDicom); err != nil {
+							log.Printf("Error escribiendo archivo %s en el ZIP: %v", rutaArchivo, err)
+							return
+						}
+						log.Printf("Archivo %s añadido correctamente al ZIP en la carpeta 'imagenes/%s'.", nuevoNombre, carpeta)
+
+						// Crear el objeto de metadatos
+						metadato := models.ImagenMetadata{
+							NombreArchivo: nuevoNombre,
+							Clave:         imagen.Clave,
+							Diagnostico:   estudio.Diagnostico[0], // Asegúrate de que esto se ajuste a tu lógica
+						}
+
+						// Agregar el metadato al mapa por carpeta
+						metadatosPorCarpeta[carpeta] = append(metadatosPorCarpeta[carpeta], metadato)
+
+					case err := <-errChan:
+						log.Printf("Error obteniendo archivo DICOM con ID %v: %v", pOID, err)
+						return
+					}
+				}(nuevoNombre, carpeta, pOID)
+
+				serial++
+			}
+		}
+	}
+
+	wg.Wait()
+
+	// Escribir los archivos de metadatos por carpeta
+	mu.Lock()
+	for carpeta, metadatos := range metadatosPorCarpeta {
+		if err := CrearArchivoJSON(zipWriter, metadatos, carpeta); err != nil {
+			log.Printf("Error creando archivo de metadatos para carpeta %s: %v", carpeta, err)
+		}
+	}
+	mu.Unlock()
+
+	log.Println("Proceso de creación de ZIP completado correctamente.")
+	return nil
 }

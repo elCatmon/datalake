@@ -8,10 +8,18 @@ import (
 
 // User representa un usuario en la base de datos.
 type User struct {
-	ID         string `json:"usuario_id"`
-	Nombre     string `json:"nombre"`
-	Correo     string `json:"correo"`
-	Contrasena string `json:"contrasena"`
+	ID         primitive.ObjectID `bson:"_id"`
+	Nombre     string             `bson:"nombre"`
+	Correo     string             `bson:"correo"`
+	Contrasena string             `bson:"contrasena"`
+	Rol        string             `bson:"rol"`
+}
+
+// Estructura para la solicitud de cambio de contraseña
+type ChangePasswordRequest struct {
+	Email           string `json:"email"`
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
 }
 
 // FileDocument representa un documento en la colección `imagenes.files`.
@@ -46,4 +54,10 @@ type EstudioDocument struct {
 	Status      int                `bson:"status"`
 	Imagenes    []Imagen           `bson:"imagenes"`
 	Diagnostico []Diagnostico      `bson:"diagnostico"`
+}
+
+type ImagenMetadata struct {
+	NombreArchivo string      `json:"nombreArchivo"`
+	Clave         string      `json:"clave"`
+	Diagnostico   Diagnostico `json:"diagnostico"`
 }

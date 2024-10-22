@@ -15,22 +15,34 @@ import (
 
 func main() {
 	// Inicializar la base de datos y el cliente MongoDB
-	db := config.InitializeDatabase()
-	defer db.Close()
 
 	client, database, bucket := config.InitializeMongoDBClient()
-	defer client.Disconnect(context.Background())
+	defer func() {
+		log.Println("Desconectando de MongoDB...")
+		if err := client.Disconnect(context.TODO()); err != nil {
+			log.Fatalf("Error al desconectar de MongoDB: %v", err)
+		}
+		log.Println("Desconexión de MongoDB exitosa.")
+	}()
 
 	// Crear un enrutador y configurar rutas
 	r := mux.NewRouter()
 
 	// Definir las rutas
 	r.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-		Handl.RegisterHandler(w, r, db)
+		Handl.RegisterHandler(w, r, database)
 	}).Methods("POST")
 
 	r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		Handl.LoginHandler(w, r, db)
+		Handl.LoginHandler(w, r, database)
+	}).Methods("POST")
+
+	r.HandleFunc("/verificarcorreo", func(w http.ResponseWriter, r *http.Request) {
+		Handl.VerificarCorreoHandler(w, r, database)
+	}).Methods("POST")
+
+	r.HandleFunc("/cambiocontrasena", func(w http.ResponseWriter, r *http.Request) {
+		Handl.CambiarContrasenaHandler(w, r, database)
 	}).Methods("POST")
 
 	r.HandleFunc("/donacion", func(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +75,12 @@ func main() {
 	// Ruta para obtener el diagnostico de una imagen
 	r.HandleFunc("/estudios/diagnostico", func(w http.ResponseWriter, r *http.Request) {
 		Handl.GetDiagnosticoHandler(w, r, database)
+	}).Methods("GET")
+
+	// Configurar las rutas
+	r.HandleFunc("/dataset/descarga", func(w http.ResponseWriter, r *http.Request) {
+		// Aquí se llamará al manejador
+		Handl.DatasetHandler(w, r, bucket, database)
 	}).Methods("GET")
 
 	// Aplicar el middleware de logging y CORS
