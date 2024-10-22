@@ -46,3 +46,33 @@ else if tipoArchivo == "jpg" && imagen.Imagen != (primitive.NilObjectID).Hex() {
 
 
 
+var ip string = "http://34.82.40.214:80"
+
+
+		// Comprobar si el archivo es DICOM
+		if filepath.Ext(tempFilePath) == ".dcm" {
+			// Anonimizar el archivo
+			fileNameWithoutExt := tempFilePath[:len(tempFilePath)-len(filepath.Ext(tempFilePath))]
+			anonFilePath := fileNameWithoutExt + "_M.dcm"
+			err = anonimizarArchivo(tempFilePath, anonFilePath)
+			if err != nil {
+				http.Error(w, "Error al anonimizar el archivo", http.StatusInternalServerError)
+				continue
+			}
+
+			// Convertir el archivo DICOM anonimizado a JPG
+			jpgtempFilePath := fileNameWithoutExt + "_M.jpg"
+			err = convertirArchivo(anonFilePath, jpgtempFilePath)
+			if err != nil {
+				http.Error(w, "Error al convertir el archivo a JPG", http.StatusInternalServerError)
+				continue
+			}
+
+			// Guardar rutas de archivos anonimizados y JPG
+			anonymizedFiles = append(anonymizedFiles, anonFilePath)
+			jpgFiles = append(jpgFiles, jpgtempFilePath)
+		}
+
+
+
+		jpgID := subirArchivoDigitalGridFS(jpgFiles[i], bucket)

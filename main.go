@@ -37,6 +37,14 @@ func main() {
 		Handl.LoginHandler(w, r, database)
 	}).Methods("POST")
 
+	r.HandleFunc("/verificarcorreo", func(w http.ResponseWriter, r *http.Request) {
+		Handl.VerificarCorreoHandler(w, r, database)
+	}).Methods("POST")
+
+	r.HandleFunc("/cambiocontrasena", func(w http.ResponseWriter, r *http.Request) {
+		Handl.CambiarContrasenaHandler(w, r, database)
+	}).Methods("POST")
+
 	r.HandleFunc("/donacion", func(w http.ResponseWriter, r *http.Request) {
 		Handl.UploadHandler(w, r, bucket, database)
 	}).Methods("POST")

@@ -15,6 +15,13 @@ type User struct {
 	Rol        string             `bson:"rol"`
 }
 
+// Estructura para la solicitud de cambio de contraseña
+type ChangePasswordRequest struct {
+	Email           string `json:"email"`
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
 // FileDocument representa un documento en la colección `imagenes.files`.
 type FileDocument struct {
 	ID         primitive.ObjectID `bson:"_id"`

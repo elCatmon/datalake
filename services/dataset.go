@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 
@@ -13,6 +14,41 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/gridfs"
 )
+
+func ObtenerArchivoDesdeGridFSDirecto(bucket *gridfs.Bucket, fileID primitive.ObjectID, archivoChan chan<- []byte, errChan chan<- error) {
+	log.Printf("Iniciando descarga del archivo con ID: %v", fileID)
+
+	var buf bytes.Buffer
+	stream, err := bucket.OpenDownloadStream(fileID)
+	if err != nil {
+		errChan <- fmt.Errorf("error abriendo stream de descarga para el archivo con ID %v: %v", fileID, err)
+		close(archivoChan)
+		close(errChan)
+		return
+	}
+	defer func() {
+		if cerr := stream.Close(); cerr != nil {
+			log.Printf("Error cerrando el stream de archivo con ID %v: %v", fileID, cerr)
+		}
+	}()
+
+	log.Printf("Stream abierto correctamente para el archivo con ID: %v", fileID)
+
+	_, err = io.Copy(&buf, stream)
+	if err != nil {
+		errChan <- fmt.Errorf("error copiando el stream del archivo con ID %v: %v", fileID, err)
+		close(archivoChan)
+		close(errChan)
+		return
+	}
+
+	log.Printf("Archivo con ID %v descargado correctamente desde GridFS", fileID)
+	archivoChan <- buf.Bytes()
+	errChan <- nil
+
+	close(archivoChan)
+	close(errChan)
+}
 
 // Convención de nombre basada en la clave y número serial
 func GenerarNombreArchivo(clave string, serial int) string {
@@ -104,36 +140,24 @@ Desglose del nombre:
 	return nil
 }
 
-// Función para obtener archivo desde GridFS usando su _id
-func ObtenerArchivoDesdeGridFS(bucket *gridfs.Bucket, fileID primitive.ObjectID) ([]byte, error) {
-	var buffer bytes.Buffer
-	log.Printf("Descargando archivo desde GridFS con ID: %v\n", fileID)
-	_, err := bucket.DownloadToStream(fileID, &buffer)
-	if err != nil {
-		log.Printf("Error al descargar el archivo con ID %v: %v", fileID, err)
-		return nil, err
-	}
-	log.Printf("Archivo con ID: %v descargado correctamente. Tamaño: %d bytes.\n", fileID, buffer.Len())
-	return buffer.Bytes(), nil
-}
-
 // Función para crear el archivo JSON con los metadatos y agregarlo al zip
-func CrearArchivoJSON(zipWriter *zip.Writer, metadatos []models.ImagenMetadata) error {
-	// Crear un nuevo archivo dentro del ZIP en la carpeta 'metadatos'
-	jsonFileWriter, err := zipWriter.Create("metadatos/metadatos.json")
+// Función para crear el archivo JSON con los metadatos y agregarlo al zip
+func CrearArchivoJSON(zipWriter *zip.Writer, metadatos []models.ImagenMetadata, carpeta string) error {
+	// Serializar metadatos a JSON
+	data, err := json.MarshalIndent(metadatos, "", "  ")
 	if err != nil {
-		log.Printf("Error al crear el archivo metadatos.json en el ZIP: %v", err)
-		return err
+		return fmt.Errorf("error serializando metadatos a JSON: %v", err)
 	}
 
-	// Codificar los metadatos en JSON y escribir en el archivo dentro del ZIP
-	encoder := json.NewEncoder(jsonFileWriter)
-	encoder.SetIndent("", "  ") // Indentar el JSON
-	if err := encoder.Encode(metadatos); err != nil {
-		log.Printf("Error al codificar metadatos en JSON: %v", err)
-		return err
+	// Crear el archivo JSON en el ZIP
+	jsonWriter, err := zipWriter.Create(fmt.Sprintf("metadatos/%s_metadata.json", carpeta))
+	if err != nil {
+		return fmt.Errorf("error creando archivo JSON en ZIP: %v", err)
+	}
+	if _, err := jsonWriter.Write(data); err != nil {
+		return fmt.Errorf("error escribiendo archivo JSON en ZIP: %v", err)
 	}
 
-	log.Println("Archivo metadatos.json creado dentro de metadatos.zip correctamente.")
+	log.Printf("Archivo de metadatos JSON creado correctamente en el ZIP: %s_metadata.json.", carpeta)
 	return nil
 }

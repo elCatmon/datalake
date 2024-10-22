@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 	"webservice/config"
 	"webservice/models"
@@ -29,14 +29,28 @@ import (
 
 // Usuarios
 // Registra nuevas cuentas de usuario
-func RegistrarUsuario(db *mongo.Database, user models.User) error {
-	collection := db.Collection("usuarios")
+func RegistrarUsuario(db *mongo.Database, user models.User) (err error) {
+	// Uso de defer para recuperar de cualquier pánico
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recuperado de pánico al registrar usuario: %v", r)
+			err = fmt.Errorf("error inesperado al registrar usuario")
+		}
+	}()
 
 	// Log de inicio del registro
 	log.Printf("Intentando registrar usuario con correo: %s", user.Correo)
 
-	// Insertar el nuevo usuario en MongoDB
-	_, err := collection.InsertOne(context.TODO(), bson.M{
+	collection := db.Collection("usuarios")
+
+	// Validación de datos del usuario (puedes agregar más validaciones)
+	if user.Nombre == "" || user.Correo == "" || user.Contrasena == "" {
+		log.Printf("Datos incompletos para registrar usuario: %+v", user)
+		return fmt.Errorf("datos incompletos para registrar usuario")
+	}
+
+	// Manejo de error en la inserción
+	_, err = collection.InsertOne(context.TODO(), bson.M{
 		"nombre":     user.Nombre,
 		"correo":     user.Correo,
 		"contrasena": user.Contrasena,
@@ -56,8 +70,21 @@ func RegistrarUsuario(db *mongo.Database, user models.User) error {
 func ExisteCorreo(db *mongo.Database, email string) (bool, error) {
 	collection := db.Collection("usuarios")
 
+	// Uso de defer para recuperar de cualquier pánico
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recuperado de pánico al verificar correo: %v", r)
+		}
+	}()
+
 	// Log de inicio de verificación
 	log.Printf("Verificando existencia de correo: %s", email)
+
+	// Validación de entrada
+	if email == "" {
+		log.Printf("El correo proporcionado está vacío")
+		return false, fmt.Errorf("el correo proporcionado está vacío")
+	}
 
 	// Buscar si existe un usuario con el correo proporcionado
 	count, err := collection.CountDocuments(context.TODO(), bson.M{"correo": email})
@@ -82,8 +109,21 @@ func ValidarUsuario(db *mongo.Database, correo, contrasena string) (bool, string
 	collection := db.Collection("usuarios")
 	var user models.User
 
+	// Uso de defer para recuperar de cualquier pánico
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recuperado de pánico al validar usuario: %v", r)
+		}
+	}()
+
 	// Log de inicio de validación
 	log.Printf("Validando credenciales para el correo: %s", correo)
+
+	// Validación de entrada
+	if correo == "" || contrasena == "" {
+		log.Printf("Correo o contraseña vacíos")
+		return false, "", fmt.Errorf("correo o contraseña vacíos")
+	}
 
 	// Buscar al usuario por correo
 	err := collection.FindOne(context.TODO(), bson.M{"correo": correo}).Decode(&user)
@@ -110,18 +150,94 @@ func ValidarUsuario(db *mongo.Database, correo, contrasena string) (bool, string
 	return true, user.ID.Hex(), nil
 }
 
+// Cambiar la contraseña del usuario
+func ChangePassword(db *mongo.Database, email, currentPassword, newPassword string) error {
+	// Uso de defer para recuperar de cualquier pánico
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recuperado de pánico al cambiar la contraseña: %v", r)
+		}
+	}()
+
+	// Validación de entrada
+	if email == "" || currentPassword == "" || newPassword == "" {
+		log.Printf("Email, contraseña actual o nueva contraseña vacíos")
+		return fmt.Errorf("email, contraseña actual o nueva contraseña vacíos")
+	}
+
+	// Verificar si el correo electrónico existe
+	exists, err := ExisteCorreo(db, email)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		log.Printf("Correo no encontrado: %s", email)
+		return errors.New("correo no encontrado")
+	}
+
+	// Validar las credenciales del usuario
+	valid, _, err := ValidarUsuario(db, email, currentPassword)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		log.Printf("La contraseña actual es incorrecta para el correo: %s", email)
+		return errors.New("la contraseña actual es incorrecta")
+	}
+
+	// Hashear la nueva contraseña
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("Error al hashear la nueva contraseña: %v", err)
+		return errors.New("error al cambiar la contraseña")
+	}
+
+	// Actualizar la contraseña en la base de datos
+	collection := db.Collection("usuarios")
+	_, err = collection.UpdateOne(context.TODO(), bson.M{"correo": email}, bson.M{"$set": bson.M{"contrasena": hashedPassword}})
+	if err != nil {
+		log.Printf("Error al actualizar la contraseña para el usuario con correo %s: %v", email, err)
+		return errors.New("error al cambiar la contraseña")
+	}
+
+	log.Printf("Contraseña cambiada exitosamente para el usuario con correo: %s", email)
+	return nil
+}
+
 // generadores
-// HashPassword genera el hash de una contraseña utilizando bcrypt.
+// HashContraseña genera el hash de una contraseña utilizando bcrypt.
 func HashContraseña(password string) (string, error) {
+	// Validación de entrada
+	if password == "" {
+		log.Printf("La contraseña está vacía")
+		return "", fmt.Errorf("la contraseña está vacía")
+	}
+
+	// Uso de defer para recuperar de cualquier pánico
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recuperado de pánico al hashear la contraseña: %v", r)
+		}
+	}()
+
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return "", err
+		log.Printf("Error al hashear la contraseña: %v", err)
+		return "", fmt.Errorf("error al hashear la contraseña: %v", err)
 	}
 	return string(bytes), nil
 }
 
 // Función para generar un hash SHA-256
+// Función para generar un hash SHA-256
 func GenerateHash(donador, numOperacion string) string {
+	// Uso de defer para recuperar de cualquier pánico
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recuperado de pánico al generar hash: %v", r)
+		}
+	}()
+
 	hashInput := donador + numOperacion
 	hash := sha256.New()
 	hash.Write([]byte(hashInput))
@@ -639,140 +755,93 @@ func GetImageKeyByFileName(filename string, db *mongo.Database) (string, error) 
 	return "", errors.New("clave no encontrada para la imagen")
 }
 
-func RenombrarArchivosZip(estudios []models.EstudioDocument, bucket *gridfs.Bucket, rutaZip string, tipoArchivo string) {
-	// Crear un nuevo archivo ZIP
-	log.Printf("Creando archivo ZIP en la ruta: %s\n", rutaZip)
-	outFile, err := os.Create(rutaZip)
-	if err != nil {
-		log.Fatalf("Error al crear archivo ZIP: %v", err)
-	}
-	defer outFile.Close()
-
-	zipWriter := zip.NewWriter(outFile)
-	defer zipWriter.Close()
-	CrearArchivosMetadata()
-
-	// Añadir los archivos de metadata (README.txt fuera de 'metadata', nameconvention.txt dentro)
-	for _, file := range []string{"./dataset/README.txt", "./dataset/nameconvention.txt"} {
-		fileData, err := os.ReadFile(file)
-		if err != nil {
-			log.Fatalf("Error leyendo archivo %s: %v", file, err)
-		}
-
-		// Definir la ruta en el ZIP dependiendo del archivo
-		var zipPath string
-		if file == "./dataset/nameconvention.txt" {
-			zipPath = "metadata/" + file // Dentro de 'metadata'
-		} else {
-
-			zipPath = "./dataset/" + file // Directamente en la raíz
-		}
-
-		// Crear el archivo dentro del ZIP en la ruta correcta
-		w, err := zipWriter.Create(zipPath)
-		if err != nil {
-			log.Fatalf("Error añadiendo %s al ZIP: %v", file, err)
-		}
-
-		if _, err := w.Write(fileData); err != nil {
-			log.Fatalf("Error escribiendo %s en el ZIP: %v", file, err)
-		}
-		log.Printf("Archivo %s añadido correctamente al ZIP en la ruta '%s'.\n", file, zipPath)
-	}
+// Función para renombrar archivos y escribir en ZIP de manera paralelizada
+func GenerarDataset(estudios []models.EstudioDocument, bucket *gridfs.Bucket, zipWriter *zip.Writer, tipoArchivo string) error {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 
 	serial := 1
-	metadatosPorCarpeta := make(map[string][]models.ImagenMetadata) // Map para almacenar los metadatos por carpeta
+	const maxConcurrency = 10 // Número máximo de goroutines concurrentes
+	semaphore := make(chan struct{}, maxConcurrency)
 
-	// Añadir archivos renombrados al ZIP en la carpeta 'imagenes'
+	log.Println("Iniciando proceso para renombrar archivos y escribir en ZIP...")
+
+	// Mapa para almacenar los metadatos por carpeta
+	metadatosPorCarpeta := make(map[string][]models.ImagenMetadata)
+
 	for _, estudio := range estudios {
 		for _, imagen := range estudio.Imagenes {
-			if imagen.Anonimizada { // Filtrar solo las imágenes anonimizadas
-				var nuevoNombre string
+			if imagen.Anonimizada && tipoArchivo == "dcm" && imagen.Dicom != primitive.NilObjectID.Hex() {
+				nuevoNombre := GenerarNombreArchivo(imagen.Clave, serial)
+				carpeta := nuevoNombre[:4] // Obtener la carpeta del nuevo nombre
+				pOID, err := primitive.ObjectIDFromHex(imagen.Dicom)
+				if err != nil {
+					log.Printf("Error al convertir Dicom ID %v: %v", imagen.Dicom, err)
+					continue
+				}
 
-				if tipoArchivo == "dcm" && imagen.Dicom != (primitive.NilObjectID).Hex() {
-					nuevoNombre = GenerarNombreArchivo(imagen.Clave, serial) // Solo el nombre base
-					pOID, _ := primitive.ObjectIDFromHex(imagen.Dicom)
-					// Obtener el archivo DICOM desde GridFS usando el _id almacenado en imagen.Dicom
-					archivoDicom, err := ObtenerArchivoDesdeGridFS(bucket, pOID)
-					if err != nil {
-						log.Printf("Error obteniendo archivo DICOM con ID %v: %v", imagen.Dicom, err)
-						continue
-					}
+				wg.Add(1)
+				semaphore <- struct{}{}
+				go func(nuevoNombre, carpeta string, pOID primitive.ObjectID) {
+					defer wg.Done()
+					defer func() { <-semaphore }()
 
-					// Obtener los primeros 4 dígitos del nombre del archivo para crear la carpeta
-					carpeta := nuevoNombre[:4]
+					archivoChan := make(chan []byte)
+					errChan := make(chan error)
 
-					// Crear el archivo dentro del ZIP con el nuevo nombre en la carpeta correspondiente
-					w, err := zipWriter.Create("imagenes/" + carpeta + "/" + nuevoNombre + ".dcm")
-					if err != nil {
-						log.Fatalf("Error creando archivo %s en el ZIP: %v", nuevoNombre, err)
-					}
-					if _, err := w.Write(archivoDicom); err != nil {
-						log.Fatalf("Error escribiendo archivo %s en el ZIP: %v", nuevoNombre, err)
-					}
-					log.Printf("Archivo DICOM %s añadido correctamente al ZIP en la carpeta 'imagenes/%s'.\n", nuevoNombre, carpeta)
+					// Llamar a la función para obtener el archivo desde GridFS en paralelo
+					go ObtenerArchivoDesdeGridFSDirecto(bucket, pOID, archivoChan, errChan)
 
-					// Añadir los metadatos correspondientes al archivo en su carpeta
-					if len(estudio.Diagnostico) > 0 {
-						diagnosticoReciente := estudio.Diagnostico[len(estudio.Diagnostico)-1]
-						metadatosPorCarpeta[carpeta] = append(metadatosPorCarpeta[carpeta], models.ImagenMetadata{
+					select {
+					case archivoDicom := <-archivoChan:
+						// Escribir el archivo en el ZIP de manera segura
+						mu.Lock()
+						defer mu.Unlock()
+
+						rutaArchivo := fmt.Sprintf("imagenes/%s/%s.dcm", carpeta, nuevoNombre)
+						w, err := zipWriter.Create(rutaArchivo)
+						if err != nil {
+							log.Printf("Error creando archivo %s en el ZIP: %v", rutaArchivo, err)
+							return
+						}
+						if _, err := w.Write(archivoDicom); err != nil {
+							log.Printf("Error escribiendo archivo %s en el ZIP: %v", rutaArchivo, err)
+							return
+						}
+						log.Printf("Archivo %s añadido correctamente al ZIP en la carpeta 'imagenes/%s'.", nuevoNombre, carpeta)
+
+						// Crear el objeto de metadatos
+						metadato := models.ImagenMetadata{
 							NombreArchivo: nuevoNombre,
 							Clave:         imagen.Clave,
-							Diagnostico: models.Diagnostico{
-								Hallazgos:     diagnosticoReciente.Hallazgos,
-								Impresion:     diagnosticoReciente.Impresion,
-								Observaciones: diagnosticoReciente.Observaciones,
-								Fecha:         diagnosticoReciente.Fecha,
-								Medico:        diagnosticoReciente.Medico,
-							},
-						})
-					}
+							Diagnostico:   estudio.Diagnostico[0], // Asegúrate de que esto se ajuste a tu lógica
+						}
 
-					serial++ // Incrementar el número de serie
-				}
+						// Agregar el metadato al mapa por carpeta
+						metadatosPorCarpeta[carpeta] = append(metadatosPorCarpeta[carpeta], metadato)
+
+					case err := <-errChan:
+						log.Printf("Error obteniendo archivo DICOM con ID %v: %v", pOID, err)
+						return
+					}
+				}(nuevoNombre, carpeta, pOID)
+
+				serial++
 			}
 		}
 	}
 
-	// Crear archivos de metadatos por carpeta
+	wg.Wait()
+
+	// Escribir los archivos de metadatos por carpeta
+	mu.Lock()
 	for carpeta, metadatos := range metadatosPorCarpeta {
-		metadataFileName := fmt.Sprintf("metadata/%s_Metadata.json", carpeta)
-		metadataContent, err := json.MarshalIndent(metadatos, "", "  ")
-		if err != nil {
-			log.Fatalf("Error serializando los metadatos: %v", err)
+		if err := CrearArchivoJSON(zipWriter, metadatos, carpeta); err != nil {
+			log.Printf("Error creando archivo de metadatos para carpeta %s: %v", carpeta, err)
 		}
-
-		w, err := zipWriter.Create(metadataFileName)
-		if err != nil {
-			log.Fatalf("Error creando archivo de metadatos %s en el ZIP: %v", metadataFileName, err)
-		}
-
-		if _, err := w.Write(metadataContent); err != nil {
-			log.Fatalf("Error escribiendo metadatos en el archivo %s: %v", metadataFileName, err)
-		}
-		log.Printf("Archivo de metadatos %s añadido correctamente al ZIP.\n", metadataFileName)
 	}
+	mu.Unlock()
 
-	// Finalizar el archivo ZIP
 	log.Println("Proceso de creación de ZIP completado correctamente.")
-}
-
-// Función para eliminar todos los archivos en una carpeta
-func EliminarArchivosEnCarpeta(carpeta string) error {
-	// Lee todos los archivos en la carpeta
-	archivos, err := os.ReadDir(carpeta)
-	if err != nil {
-		return err
-	}
-
-	// Recorre todos los archivos y elimínalos
-	for _, archivo := range archivos {
-		rutaArchivo := filepath.Join(carpeta, archivo.Name())
-		err := os.Remove(rutaArchivo)
-		if err != nil {
-			return err
-		}
-	}
-
 	return nil
 }

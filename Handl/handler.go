@@ -1,11 +1,10 @@
 package Handl
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-	"os"
 	"time"
 
 	"io"
@@ -88,6 +87,55 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 	}
+}
+
+// Manejador para verificar si existe un usuario con el correo proporcionado
+func VerificarCorreoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+	var req struct {
+		Email string `json:"email"`
+	}
+
+	// Decodificar el cuerpo de la solicitud
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Error en la solicitud", http.StatusBadRequest)
+		return
+	}
+
+	// Verificar si el correo existe en la base de datos
+	exists, err := services.ExisteCorreo(db, req.Email)
+	if err != nil {
+		http.Error(w, "Error al verificar el correo", http.StatusInternalServerError)
+		return
+	}
+
+	// Devolver la respuesta en formato JSON
+	json.NewEncoder(w).Encode(map[string]bool{"exists": exists})
+}
+
+// Manejador para cambiar la contraseña
+func CambiarContrasenaHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+	var req struct {
+		Email           string `json:"email"`
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+
+	// Decodificar la solicitud
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Error en la solicitud", http.StatusBadRequest)
+		return
+	}
+
+	// Intentar cambiar la contraseña
+	err := services.ChangePassword(db, req.Email, req.CurrentPassword, req.NewPassword)
+	if err != nil {
+		http.Error(w, "Error al cambiar la contraseña: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Respuesta de éxito
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Contraseña cambiada con éxito"})
 }
 
 func UploadHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket, database *mongo.Database) {
@@ -335,7 +383,6 @@ func GetDiagnosticoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Dat
 	json.NewEncoder(w).Encode(response)
 }
 
-// Endpoint para la descarga del dataset en formato ZIP
 func DatasetHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucket, db *mongo.Database) {
 	// Inicializa tus variables necesarias
 	collection := db.Collection("estudios")
@@ -344,38 +391,29 @@ func DatasetHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 	// Buscar todos los estudios
 	cursor, err := collection.Find(context.Background(), bson.M{})
 	if err != nil {
-		log.Fatalf("Error buscando estudios: %v", err)
+		http.Error(w, "Error buscando estudios", http.StatusInternalServerError)
+		return
 	}
 	defer cursor.Close(context.Background())
 
 	if err := cursor.All(context.Background(), &estudios); err != nil {
-		log.Fatalf("Error al convertir cursor a lista: %v", err)
+		http.Error(w, "Error al convertir cursor a lista", http.StatusInternalServerError)
+		return
 	}
+
 	tipoArchivo := r.URL.Query().Get("type") // O "jpg", dependiendo de lo que necesites
-	// Cambia esta línea:
-	rutaZip := fmt.Sprintf("dataset/dataset_%s_%s.zip", tipoArchivo, time.Now().Format("20060102_150405"))
-
-	// Asegúrate de que la carpeta './dataset/' existe
-	err = os.MkdirAll("./dataset", os.ModePerm)
-	if err != nil {
-		log.Fatalf("Error creando la carpeta ./dataset: %v", err)
-	}
-
-	// Genera el archivo ZIP
-	services.RenombrarArchivosZip(estudios, bucket, rutaZip, tipoArchivo)
 
 	// Configura las cabeceras para la descarga
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", "attachment; filename="+rutaZip+"")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=dataset_%s_%s.zip", tipoArchivo, time.Now().Format("20060102_150405")))
 
-	// Abre el archivo ZIP para lectura
-	file, err := os.Open(rutaZip)
-	if err != nil {
-		http.Error(w, "Error al abrir el archivo ZIP", http.StatusInternalServerError)
+	// Crea un nuevo zip writer para enviar el contenido al cliente
+	zipWriter := zip.NewWriter(w)
+	defer zipWriter.Close()
+
+	// Llama a la función RenombrarArchivosZip para generar el ZIP
+	if err := services.GenerarDataset(estudios, bucket, zipWriter, tipoArchivo); err != nil {
+		http.Error(w, "Error al generar el ZIP", http.StatusInternalServerError)
 		return
 	}
-	defer file.Close()
-
-	// Envía el archivo al cliente
-	http.ServeContent(w, r, rutaZip, time.Now(), file)
 }
