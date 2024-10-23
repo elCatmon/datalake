@@ -83,6 +83,11 @@ func main() {
 		Handl.DatasetHandler(w, r, bucket, database)
 	}).Methods("GET")
 
+	r.HandleFunc("/dataset/predeterminado", func(w http.ResponseWriter, r *http.Request) {
+		// Aquí se llamará al manejador
+		Handl.DatasetPredeterminadoHandler(w, r)
+	}).Methods("GET")
+
 	// Aplicar el middleware de logging y CORS
 	r.Use(middleware.LoggingMiddleware) // Aplica LoggingMiddleware a todas las rutas
 	r.Use(middleware.CORSMiddleware)    // Aplica CORSMiddleware a todas las rutas

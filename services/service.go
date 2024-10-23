@@ -755,13 +755,13 @@ func GetImageKeyByFileName(filename string, db *mongo.Database) (string, error) 
 	return "", errors.New("clave no encontrada para la imagen")
 }
 
-// Función para renombrar archivos y escribir en ZIP de manera paralelizada
+// Función para generar el dataset con programacion concurrente
 func GenerarDataset(estudios []models.EstudioDocument, bucket *gridfs.Bucket, zipWriter *zip.Writer, tipoArchivo string) error {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
 	serial := 1
-	const maxConcurrency = 10 // Número máximo de goroutines concurrentes
+	const maxConcurrency = 20 // Número máximo de goroutines concurrentes
 	semaphore := make(chan struct{}, maxConcurrency)
 
 	log.Println("Iniciando proceso para renombrar archivos y escribir en ZIP...")
@@ -769,6 +769,94 @@ func GenerarDataset(estudios []models.EstudioDocument, bucket *gridfs.Bucket, zi
 	// Mapa para almacenar los metadatos por carpeta
 	metadatosPorCarpeta := make(map[string][]models.ImagenMetadata)
 
+	// Agregar README.txt en la raíz del ZIP
+	readme := `Este dataset contiene estudios de iamgenes medicas anonimizadas
+Los archivos estan nombrados siguiendo una convension de nombres que se describen el tipo de estudio, region del cuerpo, proyeccion
+validez de la imagen, el origen de la imagen, su obtencion, sexo y edad los cuales se encuentran descritos en el archivo "nameconvention.txt"
+
+La informacion para interpletar los nombres de los archivos estan en la carpeta "Metadata".`
+	w, err := zipWriter.Create("README.txt")
+	if err != nil {
+		log.Printf("Error creando README.txt en el ZIP: %v", err)
+		return err
+	}
+	if _, err := w.Write([]byte(readme)); err != nil {
+		log.Printf("Error escribiendo README.txt en el ZIP: %v", err)
+		return err
+	}
+	log.Println("README.txt añadido correctamente al ZIP en la raíz.")
+
+	// Agregar nameconvention.txt en la carpeta 'Metadata'
+	nameconvention := `Cada archivo tiene el siguiente formato: <tipo de estudio><region><proyeccion><valida><origen><obtencion><sexo><edad>_<identificador_secuencial>.dcm/.jpg
+Ejemplo: 01020511100_0001.dcm
+Desglose del nombre:
+- Caracter 1 y 2: Tipo de estudio
+    01 - Radiografía
+    02 - Tomografía Computarizada
+    03 - Resonancia Magnética<
+    04 - Ultrasonido
+    05 - Mamografía
+    06 - Angiografía
+    07 - Medicina Nuclear
+    08 - Radio Terapia
+    09 - Fluoroscopia
+- Caracter 3 y 4: Region
+    00 - Desconocido
+    01 - Cabeza
+    02 - Cuello
+    03 - Torax
+    04 - Pelvis
+    05 - Brazo
+    06 - Manos
+    07 - Piernas
+    08 - Rodilla
+    09 - Tobillo
+    10 - Pie
+- Caracter 5 y 6: Proyeccion
+    00 - Desconocido
+    01 - Postero Anterior
+    02 - Antero Posterior
+    03 - Obliqua
+    04 - Lateral Izquierda
+    05 - Lateral Derecha
+    06 - Especial
+- Caracter 7: Valida
+    0 - Si
+    1 - No
+- Caracter 8: Origen
+    0 - Natural (Imagenes tomadas a pacientes)
+    1 - Sintetico (Imagenes generadas por IA)
+- Caracter 9: obtencion
+    0 - donacion de empresa
+    1 - donacion fisica
+    2 - donacion digital
+- Caracter 10: Sexo 
+    0 - Desconocido
+    1 - Masculino
+    2 - Femenino
+- Caracter 11: Edad (Rango de edades)
+    0 - Desconocido
+    1 - Lactantes (menores de 1 año)
+    2 - Prescolar (1 a 5 años)
+    3 - Infante (6 a 12 años)
+    4 - Adolescente (13 a 18 años)
+    5 - Adulto joven (19 a 26 años)
+    6 - Adulto (27 a 59 años)
+    7 - Adulto mayor (60 años y mas)
+- Caracter _(12 - 16): identificador secuencial
+	`
+	w, err = zipWriter.Create("metadatos/nameconvention.txt")
+	if err != nil {
+		log.Printf("Error creando metadatos/nameconvention.txt en el ZIP: %v", err)
+		return err
+	}
+	if _, err := w.Write([]byte(nameconvention)); err != nil {
+		log.Printf("Error escribiendo metadatos/nameconvention.txt en el ZIP: %v", err)
+		return err
+	}
+	log.Println("nameconvention.txt añadido correctamente al ZIP en la carpeta metadatos.")
+
+	// Procesar estudios y generar archivos de imagen DICOM
 	for _, estudio := range estudios {
 		for _, imagen := range estudio.Imagenes {
 			if imagen.Anonimizada && tipoArchivo == "dcm" && imagen.Dicom != primitive.NilObjectID.Hex() {
@@ -783,44 +871,53 @@ func GenerarDataset(estudios []models.EstudioDocument, bucket *gridfs.Bucket, zi
 				wg.Add(1)
 				semaphore <- struct{}{}
 				go func(nuevoNombre, carpeta string, pOID primitive.ObjectID) {
-					defer wg.Done()
-					defer func() { <-semaphore }()
+					defer wg.Done()                // Decrementar el contador del WaitGroup al final
+					defer func() { <-semaphore }() // Liberar un espacio en el semáforo
 
-					archivoChan := make(chan []byte)
-					errChan := make(chan error)
+					archivoChan := make(chan []byte) // Canal para recibir el archivo
+					errChan := make(chan error)      // Canal para recibir errores
 
-					// Llamar a la función para obtener el archivo desde GridFS en paralelo
+					// Llamar a la función que obtiene el archivo desde GridFS de forma concurrente
 					go ObtenerArchivoDesdeGridFSDirecto(bucket, pOID, archivoChan, errChan)
 
 					select {
 					case archivoDicom := <-archivoChan:
-						// Escribir el archivo en el ZIP de manera segura
+						// Escribir el archivo en el ZIP de manera segura usando el mutex
 						mu.Lock()
 						defer mu.Unlock()
 
+						// Definir la ruta donde se escribirá el archivo en el ZIP
 						rutaArchivo := fmt.Sprintf("imagenes/%s/%s.dcm", carpeta, nuevoNombre)
-						w, err := zipWriter.Create(rutaArchivo)
+						w, err := zipWriter.Create(rutaArchivo) // Crear el archivo en el ZIP
 						if err != nil {
 							log.Printf("Error creando archivo %s en el ZIP: %v", rutaArchivo, err)
 							return
 						}
+						// Escribir los bytes del archivo DICOM en el ZIP
 						if _, err := w.Write(archivoDicom); err != nil {
 							log.Printf("Error escribiendo archivo %s en el ZIP: %v", rutaArchivo, err)
 							return
 						}
 						log.Printf("Archivo %s añadido correctamente al ZIP en la carpeta 'imagenes/%s'.", nuevoNombre, carpeta)
 
-						// Crear el objeto de metadatos
+						// Obtener el diagnóstico más reciente
+						diagnosticoMasReciente := ObtenerDiagnosticoMasReciente(estudio.Diagnostico)
+
+						// Crear una versión del diagnóstico sin el campo "Medico"
+						diagnosticoSinMedico := CrearDiagnosticoSinMedico(diagnosticoMasReciente)
+
+						// Crear el objeto de metadatos para esta imagen, excluyendo el campo "Medico"
 						metadato := models.ImagenMetadata{
 							NombreArchivo: nuevoNombre,
 							Clave:         imagen.Clave,
-							Diagnostico:   estudio.Diagnostico[0], // Asegúrate de que esto se ajuste a tu lógica
+							Diagnostico:   diagnosticoSinMedico, // Usar el diagnóstico sin el campo "realizo"
 						}
 
-						// Agregar el metadato al mapa por carpeta
+						// Agregar los metadatos al mapa de la carpeta correspondiente
 						metadatosPorCarpeta[carpeta] = append(metadatosPorCarpeta[carpeta], metadato)
 
 					case err := <-errChan:
+						// Manejar errores al obtener el archivo desde GridFS
 						log.Printf("Error obteniendo archivo DICOM con ID %v: %v", pOID, err)
 						return
 					}

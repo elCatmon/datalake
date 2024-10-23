@@ -57,7 +57,15 @@ type EstudioDocument struct {
 }
 
 type ImagenMetadata struct {
-	NombreArchivo string      `json:"nombreArchivo"`
-	Clave         string      `json:"clave"`
-	Diagnostico   Diagnostico `json:"diagnostico"`
+	NombreArchivo string              `json:"nombreArchivo"`
+	Clave         string              `json:"clave"`
+	Diagnostico   DiagnosticoMetadata `json:"diagnostico"`
+}
+
+// Estructura sin el campo "realizo" (Medico)
+type DiagnosticoMetadata struct {
+	Hallazgos     string    `bson:"hallazgos"`
+	Impresion     string    `bson:"impresion"`
+	Observaciones string    `bson:"observaciones"`
+	Fecha         time.Time `bson:"fecha_Emision"`
 }
