@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"io"
@@ -416,4 +418,28 @@ func DatasetHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 		http.Error(w, "Error al generar el ZIP", http.StatusInternalServerError)
 		return
 	}
+}
+
+// DescargarDatasetHandler es el handler que maneja la descarga del dataset
+func DatasetPredeterminadoHandler(w http.ResponseWriter, r *http.Request) {
+	// Llamar al servicio que retorna la ruta del dataset generado
+	datasetPath := "./dataset/dataset_dcm_2024-10.zip"
+
+	// Extraer el nombre del archivo a partir de la ruta
+	fileName := filepath.Base(datasetPath)
+
+	// Abrir el archivo para lectura
+	file, err := os.Open(datasetPath)
+	if err != nil {
+		http.Error(w, "No se pudo abrir el archivo: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	// Configurar los headers de la respuesta para descarga de archivo
+	w.Header().Set("Content-Disposition", "attachment; filename="+fileName)
+	w.Header().Set("Content-Type", "application/octet-stream")
+
+	// Copiar el contenido del archivo al ResponseWriter
+	http.ServeFile(w, r, datasetPath)
 }
