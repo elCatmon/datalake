@@ -761,7 +761,7 @@ func GenerarDataset(estudios []models.EstudioDocument, bucket *gridfs.Bucket, zi
 	var mu sync.Mutex
 
 	serial := 1
-	const maxConcurrency = 20 // Número máximo de goroutines concurrentes
+	const maxConcurrency = 10 // Número máximo de goroutines concurrentes
 	semaphore := make(chan struct{}, maxConcurrency)
 
 	log.Println("Iniciando proceso para renombrar archivos y escribir en ZIP...")
