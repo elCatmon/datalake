@@ -73,7 +73,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 		return
 	}
 
-	isValid, id, authErr := services.ValidarUsuario(db, credentials.Correo, credentials.Contrasena)
+	isValid, id, rol, authErr := services.ValidarUsuario(db, credentials.Correo, credentials.Contrasena)
 	if authErr != nil {
 		http.Error(w, `{"error": "Error interno del servidor"}`, http.StatusInternalServerError)
 		return
@@ -84,10 +84,16 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 		return
 	}
 
-	response := map[string]string{"message": "Inicio de sesión exitoso", "id": id}
+	// Incluir el rol en la respuesta
+	response := map[string]string{
+		"message": "Inicio de sesión exitoso",
+		"id":      id,
+		"rol":     rol, // Agregar el rol a la respuesta
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, `{"error": "Error al codificar la respuesta"}`, http.StatusInternalServerError)
 	}
 }
 
