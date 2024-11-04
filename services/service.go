@@ -371,103 +371,140 @@ func BuscarImagenes(w http.ResponseWriter, imageIDs []primitive.ObjectID, db *mo
 // Donacion de estudios
 // Procesamiento de los datos de donacion fisica
 func ProcesarDonacionFisica(w http.ResponseWriter, r *http.Request) ([]interface{}, error) {
-
 	formData := r.MultipartForm
 
 	// Verificar campos obligatorios
 	estudioID, err := getValueOrError(formData.Value, "estudio_ID")
 	if err != nil {
+		log.Printf("Error al obtener estudio_ID: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, err
 	}
+	log.Printf("Folio recibido: %s", estudioID)
 
 	estudio, err := getValueOrError(formData.Value, "estudio")
 	if err != nil {
+		log.Printf("Error al obtener estudio: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, err
 	}
+	log.Printf("Estudio recibido: %s", estudio)
 
 	region, err := getValueOrError(formData.Value, "region")
 	if err != nil {
+		log.Printf("Error al obtener region: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, err
 	}
+	log.Printf("Región recibida: %s", region)
 
 	sexo, err := getValueOrError(formData.Value, "sexo")
 	if err != nil {
+		log.Printf("Error al obtener sexo: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, err
 	}
+	log.Printf("Sexo recibido: %s", sexo)
 
 	edad, err := getValueOrError(formData.Value, "edad")
 	if err != nil {
+		log.Printf("Error al obtener edad: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, err
 	}
+	log.Printf("Edad recibida: %s", edad)
 
-	donador, err := getValueOrError(formData.Value, "donador")
+	donador, err := getValueOrError(formData.Value, "folio")
 	if err != nil {
+		log.Printf("Error al obtener donador: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, err
 	}
+	log.Printf("Donador recibido: %s", donador)
 
 	numeroOperacion, err := getValueOrError(formData.Value, "estudio_ID")
 	if err != nil {
+		log.Printf("Error al obtener numeroOperacion: %v", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, err
 	}
+	log.Printf("Número de operación recibido: %s", numeroOperacion)
 
 	// Generar el hash a partir del nombre del donador y el número de operación
 	hash := GenerateHash(donador, numeroOperacion)
+	log.Printf("Hash generado: %s", hash)
 
 	// Procesamiento de archivos originales
 	originalFiles := formData.File["archivosOriginales"]
 	anonymizedFiles := formData.File["archivosAnonimizados"]
 
 	if len(originalFiles) == 0 {
+		log.Println("Error: No original files uploaded")
 		http.Error(w, "No original files uploaded", http.StatusBadRequest)
 		return nil, errors.New("no original files uploaded")
 	}
 
 	if len(anonymizedFiles) == 0 {
+		log.Println("Error: No anonymized files uploaded")
 		http.Error(w, "No anonymized files uploaded", http.StatusBadRequest)
 		return nil, errors.New("no anonymized files uploaded")
 	}
 
+	log.Printf("Archivos originales y anonimizados recibidos: %d originales, %d anonimizados", len(originalFiles), len(anonymizedFiles))
+
 	datos := []interface{}{estudioID, donador, estudio, hash, region, "0", sexo, edad, anonymizedFiles, originalFiles}
 
-	return datos, err
+	log.Println("Datos procesados exitosamente.")
+	return datos, nil
 }
 
+// Función para subir la donación digital
 func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.Request, database *mongo.Database) error {
+	log.Println("Iniciando procesamiento de donación digital...")
+
 	err := r.ParseMultipartForm(10 << 20) // Límite de 10MB por archivo
 	if err != nil {
+		log.Println("Error al procesar el formulario de archivos:", err)
 		http.Error(w, "Error al procesar los archivos", http.StatusBadRequest)
 		return err
 	}
 
 	files := r.MultipartForm.File["files"]
 	if len(files) == 0 {
+		log.Println("No se proporcionaron archivos.")
 		http.Error(w, "Debe proporcionar al menos un archivo", http.StatusBadRequest)
 		return fmt.Errorf("no se proporcionaron archivos")
 	}
 
+	log.Printf("Se encontraron %d archivos para procesar.\n", len(files))
+
 	var imagenes []models.Imagen
 	var anonymizedFiles []string
 	var jpgFiles []string
-	estudioID := primitive.NewObjectID().Hex()
-	donador := "DonadorEjemplo" // Valor ejemplo, reemplazar por el valor correcto
+	estudioID, _ := getValueOrError(r.MultipartForm.Value, "estudioID")
+	donador, _ := getValueOrError(r.MultipartForm.Value, "donador")
 	estudio, _ := getValueOrError(r.MultipartForm.Value, "tipoEstudio")
 	clave := estudio + "00" + "00" + "0" + "0" + "1" + "0" + "0"
 	hash := GenerateHash(donador, estudio)
 
 	// Iterar sobre cada archivo enviado
 	for _, fileHeader := range files {
+		log.Printf("Procesando archivo: %s\n", fileHeader.Filename)
+
 		// Abrir el archivo subido
 		file, err := fileHeader.Open()
 		if err != nil {
+			log.Println("Error al abrir el archivo:", err)
 			http.Error(w, "Error al abrir el archivo", http.StatusBadRequest)
-			continue // Continuar con el siguiente archivo
+			continue
 		}
 		defer file.Close()
 
 		// Guardar el archivo temporalmente
-		tempFilePath := "./archivos/" + fileHeader.Filename
+		tempFilePath := "../archivos/" + fileHeader.Filename
 		tempFile, err := os.Create(tempFilePath)
 		if err != nil {
+			log.Println("Error al crear el archivo temporal:", err)
 			http.Error(w, "Error al crear el archivo temporal", http.StatusInternalServerError)
 			continue
 		}
@@ -475,28 +512,39 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 
 		_, err = io.Copy(tempFile, file)
 		if err != nil {
+			log.Println("Error al copiar el archivo:", err)
 			http.Error(w, "Error al copiar el archivo", http.StatusInternalServerError)
 			continue
 		}
 
+		log.Printf("Archivo guardado temporalmente en: %s\n", tempFilePath)
+
 		// Comprobar si el archivo es DICOM
 		if filepath.Ext(tempFilePath) == ".dcm" {
+			log.Println("El archivo es un DICOM. Procediendo a anonimización...")
+
 			// Anonimizar el archivo
 			fileNameWithoutExt := tempFilePath[:len(tempFilePath)-len(filepath.Ext(tempFilePath))]
 			anonFilePath := fileNameWithoutExt + "_M.dcm"
 			err = anonimizarArchivo(tempFilePath, anonFilePath)
 			if err != nil {
+				log.Println("Error al anonimizar el archivo:", err)
 				http.Error(w, "Error al anonimizar el archivo", http.StatusInternalServerError)
 				continue
 			}
+
+			log.Printf("Archivo anonimizado guardado en: %s\n", anonFilePath)
 
 			// Convertir el archivo DICOM anonimizado a JPG
 			jpgtempFilePath := fileNameWithoutExt + "_M.jpg"
 			err = convertirArchivo(anonFilePath, jpgtempFilePath)
 			if err != nil {
+				log.Println("Error al convertir el archivo a JPG:", err)
 				http.Error(w, "Error al convertir el archivo a JPG", http.StatusInternalServerError)
 				continue
 			}
+
+			log.Printf("Archivo convertido a JPG guardado en: %s\n", jpgtempFilePath)
 
 			// Guardar rutas de archivos anonimizados y JPG
 			anonymizedFiles = append(anonymizedFiles, anonFilePath)
@@ -504,8 +552,10 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 		}
 
 		// Subir archivo (ya sea JPG o DICOM) a GridFS
+		log.Printf("Subiendo archivo %s a GridFS...\n", tempFilePath)
 		fileID := subirArchivoDigitalGridFS(tempFilePath, bucket)
 		if fileID == "" {
+			log.Println("Error al subir el archivo original a GridFS")
 			http.Error(w, "Fallo al subir a la base de datos los archivos originales", http.StatusInternalServerError)
 			continue
 		}
@@ -519,10 +569,13 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 
 	// Subir archivos anonimizados y JPG a GridFS
 	for i := range anonymizedFiles {
+		log.Printf("Subiendo archivo anonimizado %s a GridFS...\n", anonymizedFiles[i])
 		fileID := subirArchivoDigitalGridFS(anonymizedFiles[i], bucket)
+		log.Printf("Subiendo archivo JPG %s a GridFS...\n", jpgFiles[i])
 		jpgID := subirArchivoDigitalGridFS(jpgFiles[i], bucket)
 
 		if fileID == "" || jpgID == "" {
+			log.Println("Error al subir archivos anonimizados a GridFS")
 			http.Error(w, "Fallo al subir a la base de datos los archivos anonimizados", http.StatusInternalServerError)
 			continue
 		}
@@ -553,9 +606,11 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 	}
 
 	// Insertar el documento en MongoDB
+	log.Println("Insertando documento de estudio en MongoDB...")
 	collection := database.Collection("estudios")
 	_, err = collection.InsertOne(context.Background(), estudioDoc)
 	if err != nil {
+		log.Println("Error al insertar el documento en MongoDB:", err)
 		http.Error(w, "Fallo al insertar el documento", http.StatusInternalServerError)
 		return err
 	}
@@ -563,10 +618,15 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 	// Eliminar archivos temporales
 	for _, path := range append(anonymizedFiles, jpgFiles...) {
 		if err := os.Remove(path); err != nil {
+			log.Printf("Error al eliminar el archivo temporal %s: %v\n", path, err)
+		} else {
+			log.Printf("Archivo temporal %s eliminado correctamente.\n", path)
 		}
 	}
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Todos los archivos han sido procesados exitosamente y el estudio ha sido registrado."))
+	log.Println("Procesamiento de donación digital completado exitosamente.")
 	return nil
 }
 

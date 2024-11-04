@@ -47,7 +47,10 @@ func anonimizarArchivo(tempFilePath, anonFilePath string) error {
 	if runtime.GOOS == "windows" {
 		cmd = exec.Command("python", "./services/anonimizacion.py", tempFilePath, anonFilePath)
 	} else {
-		cmd = exec.Command("python3", "./services/anonimizacion.py", tempFilePath, anonFilePath)
+		pythonExecutable := "/home/upp05/mi_entorno/bin/python"
+
+		// Crear el comando para ejecutar el script
+		cmd = exec.Command(pythonExecutable, "./services/anonimizacion.py", tempFilePath, anonFilePath)
 	}
 
 	// Ejecutar el comando
@@ -64,7 +67,10 @@ func convertirArchivo(tempFilePath, jpgFilePath string) error {
 	if runtime.GOOS == "windows" {
 		cmd = exec.Command("python", "./services/dcm_jpg.py", tempFilePath, jpgFilePath)
 	} else {
-		cmd = exec.Command("python3", "./services/dcm_jpg.py", tempFilePath, jpgFilePath)
+		pythonExecutable := "/home/upp05/mi_entorno/bin/python"
+
+		// Crear el comando para ejecutar el script
+		cmd = exec.Command(pythonExecutable, "./services/dcm_jpg.py", tempFilePath, jpgFilePath)
 	}
 
 	// Ejecutar el comando
