@@ -261,7 +261,13 @@ func EnviaCorreoPDF(estudio Estudio, pdfBuffer *bytes.Buffer) error {
 
 func EnviaCorreoConfirmacion(correo string, fecha string, folio string) error {
 	// Formatear la fecha
-	fechaN := time.Now().Format("02-01-2006") // Usar el formato "día-mes-año"
+	parsedTime, err := time.Parse(time.RFC3339, fecha)
+	if err != nil {
+		fmt.Println("Error al parsear la fecha:", err)
+	}
+	// Formatear la fecha al formato dd-mm-aaaa
+	fechaFormateada := parsedTime.Format("02-01-2006")
+	fmt.Println("Fecha formateada:", fechaFormateada)
 
 	// Crear el mensaje con formato HTML
 	mensaje := fmt.Sprintf(`
@@ -271,7 +277,7 @@ func EnviaCorreoConfirmacion(correo string, fecha string, folio string) error {
     a recogerlos en cualquier momento.<br><br>
     Atentamente,<br>
     El equipo de Digitalización y Anonimizacion
-`, fechaN, folio)
+`, fechaFormateada, folio)
 
 	// Crear un nuevo mensaje de correo
 	m := gomail.NewMessage()
