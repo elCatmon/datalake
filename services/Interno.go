@@ -24,6 +24,7 @@ type DetalleEstudio struct {
 	CantidadImagenes int    `json:"cantidadImagenes"`
 	EsDonacion       bool   `json:"esDonacion"`
 	Observaciones    string `json:"observaciones"`
+	Id               int    `json:"id"`
 }
 
 type Estudio struct {
@@ -365,7 +366,7 @@ func GetEstudios(filtros map[string]interface{}, db *sql.DB) ([]Estudio, error) 
 	SELECT 
 		e.folio, e.fecha_recepcion, e.fecha_devolucion, e.correo, e.curp, e.carrera, 
 		e.cuatrimestre, e.area, 
-		d.tipo_estudio, d.cantidad_imagenes, d.es_donacion, d.observaciones 
+		d.tipo_estudio, d.cantidad_imagenes, d.es_donacion, d.observaciones, d.id 
 	FROM estudios e
 	LEFT JOIN detalles_estudios d ON e.folio = d.folio
 	`
@@ -433,9 +434,10 @@ func GetEstudios(filtros map[string]interface{}, db *sql.DB) ([]Estudio, error) 
 			cantidadImagenes int
 			esDonacion       bool
 			observaciones    string
+			id               int
 		)
 
-		err := rows.Scan(&folio, &fechaRecepcion, &fechaDevolucion, &correo, &curp, &carrera, &cuatrimestre, &area, &tipoEstudio, &cantidadImagenes, &esDonacion, &observaciones)
+		err := rows.Scan(&folio, &fechaRecepcion, &fechaDevolucion, &correo, &curp, &carrera, &cuatrimestre, &area, &tipoEstudio, &cantidadImagenes, &esDonacion, &observaciones, &id)
 		if err != nil {
 			log.Printf("Error al escanear el estudio con folio %s: %v", folio, err)
 			return nil, err
@@ -448,6 +450,7 @@ func GetEstudios(filtros map[string]interface{}, db *sql.DB) ([]Estudio, error) 
 			CantidadImagenes: cantidadImagenes,
 			EsDonacion:       esDonacion,
 			Observaciones:    observaciones,
+			Id:               id,
 		}
 
 		if estudio, exists := estudiosMap[folio]; exists {
