@@ -127,6 +127,16 @@ func NewHandler(service *EstudioService) *Handler {
 func GeneraPDF(estudio Estudio) (*bytes.Buffer, error) {
 	pdf := gofpdf.New("P", "mm", "A4", "")
 	pdf.AddPage()
+
+	pdf.ImageOptions("./images/logo_bdmdm.png", 12, 10, 50, 15, false, gofpdf.ImageOptions{ImageType: "png", ReadDpi: true}, 0, "")
+	pdf.ImageOptions("./images/logo_upp.png", 97, 10, 12, 15, false, gofpdf.ImageOptions{ImageType: "png", ReadDpi: true}, 0, "")
+	pdf.ImageOptions("./images/logo_citedi.png", 148, 10, 50, 15, false, gofpdf.ImageOptions{ImageType: "png", ReadDpi: true}, 0, "")
+
+	pdf.SetFont("Arial", "", 10)
+	pdf.Cell(50, 50, "Repositorio")
+
+	pdf.SetY(45)
+
 	pdf.SetFont("Arial", "B", 16)
 	pdf.Cell(40, 10, "Informacion de Registro")
 	pdf.Ln(12)
@@ -205,7 +215,11 @@ func GeneraPDF(estudio Estudio) (*bytes.Buffer, error) {
 		}
 
 		// Es Donacion
-		pdf.Cell(0, 10, fmt.Sprintf("  Es Donacion: %t", detalle.EsDonacion))
+		donacion := "No"
+		if detalle.EsDonacion {
+			donacion = "Si"
+		}
+		pdf.Cell(0, 10, fmt.Sprintf("  Donacion: %s", donacion))
 		pdf.Ln(8)
 
 		// Observaciones
@@ -272,11 +286,11 @@ func EnviaCorreoConfirmacion(correo string, fecha string, folio string) error {
 
 	// Crear el mensaje con formato HTML
 	mensaje := fmt.Sprintf(`
-    Buen día,<br><br>
+    Buen día<br><br>
     Le informamos que el proceso de digitalización de sus estudios prestados el día: <strong>%s</strong> 
     con el número de folio: <strong>%s</strong>, ha sido realizado exitosamente. Por lo tanto, ya puede pasar 
     a recogerlos en cualquier momento.<br><br>
-    Atentamente,<br>
+    Atentamente<br>
     El equipo de Digitalización y Anonimizacion
 `, fechaFormateada, folio)
 

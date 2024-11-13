@@ -44,7 +44,7 @@ func RegistrarUsuario(db *mongo.Database, user models.User) (err error) {
 	collection := db.Collection("usuarios")
 
 	// Validación de datos del usuario (puedes agregar más validaciones)
-	if user.Nombre == "" || user.Correo == "" || user.Contrasena == "" {
+	if user.Nombre == "" || user.Correo == "" || user.Contrasena == "" || user.Curp == "" {
 		log.Printf("Datos incompletos para registrar usuario: %+v", user)
 		return fmt.Errorf("datos incompletos para registrar usuario")
 	}
@@ -52,6 +52,7 @@ func RegistrarUsuario(db *mongo.Database, user models.User) (err error) {
 	// Manejo de error en la inserción
 	_, err = collection.InsertOne(context.TODO(), bson.M{
 		"nombre":     user.Nombre,
+		"curp":       user.Curp,
 		"correo":     user.Correo,
 		"contrasena": user.Contrasena,
 		"rol":        "consultor", // Asigna un rol al usuario
@@ -105,31 +106,41 @@ func ExisteCorreo(db *mongo.Database, email string) (bool, error) {
 }
 
 // ValidarUsuario verifica las credenciales del usuario y devuelve el ID del usuario si son válidas.
-func ValidarUsuario(db *mongo.Database, correo, contrasena string) (bool, string, string, error) {
+func ValidarUsuario(db *mongo.Database, correo string, contrasena string) (bool, string, string, string, error) {
 	collection := db.Collection("usuarios")
 	var user models.User
 
+	// Log de inicio de validación
+	log.Printf("Validando usuario con correo: %s", correo)
+
 	// Validación de entrada
 	if correo == "" || contrasena == "" {
-		return false, "", "", fmt.Errorf("correo o contraseña vacíos")
+		log.Printf("Correo o contraseña vacíos")
+		return false, "", "", "", fmt.Errorf("correo o contraseña vacíos")
 	}
 
 	// Buscar al usuario por correo
 	err := collection.FindOne(context.TODO(), bson.M{"correo": correo}).Decode(&user)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return false, "", "", nil // Usuario no encontrado
+			log.Printf("Usuario no encontrado para el correo: %s", correo)
+			return false, "", "", "", nil // Usuario no encontrado
 		}
-		return false, "", "", fmt.Errorf("error al buscar usuario: %v", err)
+		log.Printf("Error al buscar usuario con correo %s: %v", correo, err)
+		return false, "", "", "", fmt.Errorf("error al buscar usuario: %v", err)
 	}
 
 	// Verificar la contraseña usando bcrypt
 	err = bcrypt.CompareHashAndPassword([]byte(user.Contrasena), []byte(contrasena))
 	if err != nil {
-		return false, "", "", nil // Contraseña incorrecta
+		log.Printf("Contraseña incorrecta para el usuario con correo: %s", correo)
+		return false, "", "", "", nil // Contraseña incorrecta
 	}
 
-	return true, user.ID.Hex(), user.Rol, nil // Retornar el ID y rol del usuario
+	// Log de éxito en la validación
+	log.Printf("Usuario validado correctamente: %s", correo)
+
+	return true, user.ID.Hex(), user.Curp, user.Rol, nil // Retornar el ID y rol del usuario
 }
 
 // Cambiar la contraseña del usuario
@@ -158,7 +169,7 @@ func ChangePassword(db *mongo.Database, email, currentPassword, newPassword stri
 	}
 
 	// Validar las credenciales del usuario
-	valid, _, _, err := ValidarUsuario(db, email, currentPassword)
+	valid, _, _, _, err := ValidarUsuario(db, email, currentPassword)
 	if err != nil {
 		return err
 	}
