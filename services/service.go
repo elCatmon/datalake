@@ -55,7 +55,9 @@ func RegistrarUsuario(db *mongo.Database, user models.User) (err error) {
 		"curp":       user.Curp,
 		"correo":     user.Correo,
 		"contrasena": user.Contrasena,
-		"rol":        "consultor", // Asigna un rol al usuario
+		"estado":     user.Estado,
+		"municipio":  user.Municipio,
+		"rol":        "consultor",
 	})
 	if err != nil {
 		log.Printf("Error al registrar usuario con correo %s: %v", user.Correo, err)
