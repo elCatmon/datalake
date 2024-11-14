@@ -7,6 +7,7 @@ import (
 	"archive/zip"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,138 +30,103 @@ import (
 
 // Usuarios
 // Registra nuevas cuentas de usuario
-func RegistrarUsuario(db *mongo.Database, user models.User) (err error) {
-	// Uso de defer para recuperar de cualquier pánico
+func RegistrarUsuario(db *sql.DB, user models.User) error {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Recuperado de pánico al registrar usuario: %v", r)
-			err = fmt.Errorf("error inesperado al registrar usuario")
 		}
 	}()
 
-	// Log de inicio del registro
 	log.Printf("Intentando registrar usuario con correo: %s", user.Correo)
 
-	collection := db.Collection("usuarios")
-
-	// Validación de datos del usuario (puedes agregar más validaciones)
 	if user.Nombre == "" || user.Correo == "" || user.Contrasena == "" || user.Curp == "" {
 		log.Printf("Datos incompletos para registrar usuario: %+v", user)
 		return fmt.Errorf("datos incompletos para registrar usuario")
 	}
 
-	// Manejo de error en la inserción
-	_, err = collection.InsertOne(context.TODO(), bson.M{
-		"nombre":     user.Nombre,
-		"curp":       user.Curp,
-		"correo":     user.Correo,
-		"contrasena": user.Contrasena,
-		"estado":     user.Estado,
-		"municipio":  user.Municipio,
-		"rol":        "consultor",
-	})
+	query := `INSERT INTO usuarios (nombre, curp, correo, contrasena, estado, municipio, rol) 
+              VALUES ($1, $2, $3, $4, $5, $6, 'consultor')`
+
+	_, err := db.Exec(query, user.Nombre, user.Curp, user.Correo, user.Contrasena, user.Estado, user.Municipio)
 	if err != nil {
 		log.Printf("Error al registrar usuario con correo %s: %v", user.Correo, err)
 		return fmt.Errorf("error al registrar usuario: %v", err)
 	}
 
-	// Log de éxito
 	log.Printf("Usuario registrado exitosamente con correo: %s", user.Correo)
 	return nil
 }
 
 // Valida que no existe un correo ya registrado al momento de crear una cuenta
-func ExisteCorreo(db *mongo.Database, email string) (bool, error) {
-	collection := db.Collection("usuarios")
-
-	// Uso de defer para recuperar de cualquier pánico
+func ExisteCorreo(db *sql.DB, email string) (bool, error) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Recuperado de pánico al verificar correo: %v", r)
 		}
 	}()
 
-	// Log de inicio de verificación
 	log.Printf("Verificando existencia de correo: %s", email)
 
-	// Validación de entrada
 	if email == "" {
 		log.Printf("El correo proporcionado está vacío")
 		return false, fmt.Errorf("el correo proporcionado está vacío")
 	}
 
-	// Buscar si existe un usuario con el correo proporcionado
-	count, err := collection.CountDocuments(context.TODO(), bson.M{"correo": email})
+	var count int
+	query := `SELECT COUNT(*) FROM usuarios WHERE correo = $1`
+	err := db.QueryRow(query, email).Scan(&count)
 	if err != nil {
 		log.Printf("Error al verificar correo %s: %v", email, err)
 		return false, fmt.Errorf("error al verificar el correo: %v", err)
 	}
 
-	// Log de resultado de la verificación
-	if count > 0 {
-		log.Printf("El correo %s ya está registrado", email)
-	} else {
-		log.Printf("El correo %s no está registrado", email)
-	}
-
-	// Si `count` es mayor que 0, significa que el correo ya existe
 	return count > 0, nil
 }
 
 // ValidarUsuario verifica las credenciales del usuario y devuelve el ID del usuario si son válidas.
-func ValidarUsuario(db *mongo.Database, correo string, contrasena string) (bool, string, string, string, error) {
-	collection := db.Collection("usuarios")
-	var user models.User
-
-	// Log de inicio de validación
+func ValidarUsuario(db *sql.DB, correo, contrasena string) (bool, int, string, string, error) {
 	log.Printf("Validando usuario con correo: %s", correo)
 
-	// Validación de entrada
 	if correo == "" || contrasena == "" {
 		log.Printf("Correo o contraseña vacíos")
-		return false, "", "", "", fmt.Errorf("correo o contraseña vacíos")
+		return false, 0, "", "", fmt.Errorf("correo o contraseña vacíos")
 	}
 
-	// Buscar al usuario por correo
-	err := collection.FindOne(context.TODO(), bson.M{"correo": correo}).Decode(&user)
+	var user models.User
+	query := `SELECT id_usuario, contrasena, curp, rol FROM usuarios WHERE correo = $1`
+	err := db.QueryRow(query, correo).Scan(&user.ID, &user.Contrasena, &user.Curp, &user.Rol)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
+		if err == sql.ErrNoRows {
 			log.Printf("Usuario no encontrado para el correo: %s", correo)
-			return false, "", "", "", nil // Usuario no encontrado
+			return false, 0, "", "", nil
 		}
 		log.Printf("Error al buscar usuario con correo %s: %v", correo, err)
-		return false, "", "", "", fmt.Errorf("error al buscar usuario: %v", err)
+		return false, 0, "", "", fmt.Errorf("error al buscar usuario: %v", err)
 	}
 
-	// Verificar la contraseña usando bcrypt
 	err = bcrypt.CompareHashAndPassword([]byte(user.Contrasena), []byte(contrasena))
 	if err != nil {
 		log.Printf("Contraseña incorrecta para el usuario con correo: %s", correo)
-		return false, "", "", "", nil // Contraseña incorrecta
+		return false, 0, "", "", nil
 	}
 
-	// Log de éxito en la validación
 	log.Printf("Usuario validado correctamente: %s", correo)
-
-	return true, user.ID.Hex(), user.Curp, user.Rol, nil // Retornar el ID y rol del usuario
+	return true, user.ID, user.Curp, user.Rol, nil
 }
 
 // Cambiar la contraseña del usuario
-func ChangePassword(db *mongo.Database, email, currentPassword, newPassword string) error {
-	// Uso de defer para recuperar de cualquier pánico
+func ChangePassword(db *sql.DB, email, currentPassword, newPassword string) error {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Recuperado de pánico al cambiar la contraseña: %v", r)
 		}
 	}()
 
-	// Validación de entrada
 	if email == "" || currentPassword == "" || newPassword == "" {
 		log.Printf("Email, contraseña actual o nueva contraseña vacíos")
 		return fmt.Errorf("email, contraseña actual o nueva contraseña vacíos")
 	}
 
-	// Verificar si el correo electrónico existe
 	exists, err := ExisteCorreo(db, email)
 	if err != nil {
 		return err
@@ -170,7 +136,6 @@ func ChangePassword(db *mongo.Database, email, currentPassword, newPassword stri
 		return errors.New("correo no encontrado")
 	}
 
-	// Validar las credenciales del usuario
 	valid, _, _, _, err := ValidarUsuario(db, email, currentPassword)
 	if err != nil {
 		return err
@@ -180,16 +145,14 @@ func ChangePassword(db *mongo.Database, email, currentPassword, newPassword stri
 		return errors.New("la contraseña actual es incorrecta")
 	}
 
-	// Hashear la nueva contraseña
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		log.Printf("Error al hashear la nueva contraseña: %v", err)
 		return errors.New("error al cambiar la contraseña")
 	}
 
-	// Actualizar la contraseña en la base de datos
-	collection := db.Collection("usuarios")
-	_, err = collection.UpdateOne(context.TODO(), bson.M{"correo": email}, bson.M{"$set": bson.M{"contrasena": hashedPassword}})
+	query := `UPDATE usuarios SET contrasena = $1 WHERE correo = $2`
+	_, err = db.Exec(query, hashedPassword, email)
 	if err != nil {
 		log.Printf("Error al actualizar la contraseña para el usuario con correo %s: %v", email, err)
 		return errors.New("error al cambiar la contraseña")

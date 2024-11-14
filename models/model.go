@@ -8,14 +8,14 @@ import (
 
 // User representa un usuario en la base de datos.
 type User struct {
-	ID         primitive.ObjectID `bson:"_id"`
-	Nombre     string             `bson:"nombre"`
-	Correo     string             `bson:"correo"`
-	Contrasena string             `bson:"contrasena"`
-	Curp       string             `bson:"curp"`
-	Estado     string             `bson:"estado"`
-	Municipio  string             `bson:"municipio"`
-	Rol        string             `bson:"rol"`
+	ID         int    `json:"id"`
+	Nombre     string `json:"nombre"`
+	Correo     string `json:"correo"`
+	Contrasena string `json:"contrasena"`
+	Curp       string `json:"curp"`
+	Estado     string `json:"estado"`
+	Municipio  string `json:"municipio"`
+	Rol        string `json:"rol"`
 }
 
 // Estructura para la solicitud de cambio de contraseña

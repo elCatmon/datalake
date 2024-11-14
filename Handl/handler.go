@@ -3,6 +3,7 @@ package Handl
 import (
 	"archive/zip"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,7 +26,7 @@ import (
 )
 
 // RegisterHandler maneja la solicitud de registro de un nuevo usuario.
-func RegisterHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+func RegisterHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	w.Header().Set("Content-Type", "application/json")
 	var newUser models.User
 	err := json.NewDecoder(r.Body).Decode(&newUser)
@@ -65,7 +66,7 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database)
 }
 
 // LoginHandler maneja la solicitud de inicio de sesión del usuario.
-func LoginHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var credentials models.User
 	err := json.NewDecoder(r.Body).Decode(&credentials)
 	if err != nil {
@@ -87,7 +88,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 	// Incluir el rol en la respuesta
 	response := map[string]string{
 		"message": "Inicio de sesión exitoso",
-		"id":      id,
+		"id":      string(id),
 		"curp":    curp,
 		"rol":     rol,
 	}
@@ -99,7 +100,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 }
 
 // Manejador para verificar si existe un usuario con el correo proporcionado
-func VerificarCorreoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+func VerificarCorreoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var req struct {
 		Email string `json:"email"`
 	}
@@ -122,7 +123,7 @@ func VerificarCorreoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Da
 }
 
 // Manejador para cambiar la contraseña
-func CambiarContrasenaHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+func CambiarContrasenaHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var req struct {
 		Email           string `json:"email"`
 		CurrentPassword string `json:"currentPassword"`

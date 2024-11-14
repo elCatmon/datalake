@@ -47,19 +47,19 @@ func main() {
 
 	// Definir las rutas
 	r.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-		Handl.RegisterHandler(w, r, database)
+		Handl.RegisterHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		Handl.LoginHandler(w, r, database)
+		Handl.LoginHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/verificarcorreo", func(w http.ResponseWriter, r *http.Request) {
-		Handl.VerificarCorreoHandler(w, r, database)
+		Handl.VerificarCorreoHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/cambiocontrasena", func(w http.ResponseWriter, r *http.Request) {
-		Handl.CambiarContrasenaHandler(w, r, database)
+		Handl.CambiarContrasenaHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/donacion", func(w http.ResponseWriter, r *http.Request) {
