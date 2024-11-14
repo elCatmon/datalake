@@ -12,7 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var ip string = "http://192.168.100.5:8080"
+var ip string = "http://192.168.240.20:8080"
 
 func GetIP() string {
 	return ip

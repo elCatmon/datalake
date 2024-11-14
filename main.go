@@ -2,20 +2,28 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gorilla/handlers" // Importa el paquete de handlers
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 
 	"webservice/Handl"
 	"webservice/config"
 	"webservice/middleware"
+	"webservice/services"
 )
 
 func main() {
-	// Inicializar la base de datos y el cliente MongoDB
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalf("Error cargando el archivo .env: %v", err)
+	}
 
+	// Inicializar la base de datos y el cliente MongoDB
 	client, database, bucket := config.InitializeMongoDBClient()
 	defer func() {
 		log.Println("Desconectando de MongoDB...")
@@ -25,8 +33,17 @@ func main() {
 		log.Println("Desconexión de MongoDB exitosa.")
 	}()
 
+	connStr := os.Getenv("POSTGRES_CONNECTION")
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		log.Fatalf("Error al conectar con la base de datos: %v", err)
+	}
+	defer db.Close()
+
 	// Crear un enrutador y configurar rutas
 	r := mux.NewRouter()
+	service := services.NewEstudioService(db)
+	handler := services.NewHandler(service)
 
 	// Definir las rutas
 	r.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +105,10 @@ func main() {
 		Handl.DatasetPredeterminadoHandler(w, r)
 	}).Methods("GET")
 
+	r.HandleFunc("/api/estudios", handler.CreateEstudio)
+	r.HandleFunc("/api/estudios/consulta", handler.GetEstudios)
+	r.HandleFunc("/api/estudios/confirmar-digitalizacion", handler.ConfirmarDigitalizacion)
+
 	// Aplicar el middleware de logging y CORS
 	r.Use(middleware.LoggingMiddleware) // Aplica LoggingMiddleware a todas las rutas
 	r.Use(middleware.CORSMiddleware)    // Aplica CORSMiddleware a todas las rutas
@@ -102,4 +123,5 @@ func main() {
 	// Iniciar el servidor
 	log.Println("Servidor escuchando en http://localhost:8080...")
 	log.Fatal(http.ListenAndServe(":8080", corsHandler))
+
 }

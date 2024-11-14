@@ -12,6 +12,9 @@ type User struct {
 	Nombre     string             `bson:"nombre"`
 	Correo     string             `bson:"correo"`
 	Contrasena string             `bson:"contrasena"`
+	Curp       string             `bson:"curp"`
+	Estado     string             `bson:"estado"`
+	Municipio  string             `bson:"municipio"`
 	Rol        string             `bson:"rol"`
 }
 
