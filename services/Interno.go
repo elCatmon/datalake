@@ -45,25 +45,10 @@ type RequestData struct {
 	Folio  string `json:"folio"`
 }
 
-// Servicio para manejar operaciones con estudios
-type EstudioService struct {
-	DB *sql.DB
-}
-
-// Handler para manejar solicitudes HTTP relacionadas con estudios
-type Handler struct {
-	Service *EstudioService
-}
-
-// Crear un nuevo servicio de estudios
-func NewEstudioService(db *sql.DB) *EstudioService {
-	return &EstudioService{DB: db}
-}
-
 // Función para guardar un nuevo estudio en la base de datos
-func (s *EstudioService) CreateEstudio(estudio Estudio) error {
+func CreateEstudio(estudio Estudio, db *sql.DB) error {
 	// Iniciar una transacción
-	tx, err := s.DB.Begin()
+	tx, err := db.Begin()
 	if err != nil {
 		log.Printf("Error al iniciar la transacción: %v", err)
 		return err
@@ -116,11 +101,6 @@ func (s *EstudioService) CreateEstudio(estudio Estudio) error {
 	}
 
 	return nil // Retornar nil si no hay errores
-}
-
-// Crear un nuevo handler de estudios
-func NewHandler(service *EstudioService) *Handler {
-	return &Handler{Service: service}
 }
 
 // Función para generar un PDF con los detalles del estudio
@@ -327,51 +307,6 @@ func EnviaCorreoConfirmacion(correo string, fecha string, folio string) error {
 	return nil
 }
 
-// Handler para crear un nuevo estudio y enviar el PDF por correo
-func (h *Handler) CreateEstudio(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
-		log.Printf("Método no permitido: %s", r.Method)
-		return
-	}
-
-	var estudio Estudio
-	err := json.NewDecoder(r.Body).Decode(&estudio)
-	if err != nil {
-		http.Error(w, "Error al decodificar la solicitud", http.StatusBadRequest)
-		log.Printf("Error al decodificar la solicitud: %v", err)
-		return
-	}
-
-	log.Printf("Creando estudio: %+v", estudio)
-	err = h.Service.CreateEstudio(estudio)
-	if err != nil {
-		http.Error(w, "Error al guardar el estudio", http.StatusInternalServerError)
-		log.Printf("Error al guardar el estudio: %v", err)
-		return
-	}
-
-	// Generar el PDF con todos los detalles de los estudios
-	pdfBuffer, err := GeneraPDF(estudio)
-	if err != nil {
-		http.Error(w, "Error al generar el PDF", http.StatusInternalServerError)
-		log.Printf("Error al generar el PDF: %v", err)
-		return
-	}
-
-	// Enviar el correo con el PDF adjunto
-	err = EnviaCorreoPDF(estudio, pdfBuffer)
-	if err != nil {
-		http.Error(w, "Error al enviar el correo", http.StatusInternalServerError)
-		log.Printf("Error al enviar el correo: %v", err)
-		return
-	}
-
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte("Estudio guardado y correo enviado correctamente"))
-	log.Println("Estudio guardado y correo enviado correctamente")
-}
-
 // Función para obtener estudios desde la base de datos con filtros opcionales
 func GetEstudios(filtros map[string]interface{}, db *sql.DB) ([]Estudio, error) {
 	log.Println("Iniciando consulta de estudios con los filtros:", filtros)
@@ -506,8 +441,54 @@ func GetEstudios(filtros map[string]interface{}, db *sql.DB) ([]Estudio, error) 
 	return estudios, nil
 }
 
+// Handler para crear un nuevo estudio y enviar el PDF por correo
+func CreateEstudioHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
+		log.Printf("Método no permitido: %s", r.Method)
+		return
+	}
+
+	var estudio Estudio
+	err := json.NewDecoder(r.Body).Decode(&estudio)
+	if err != nil {
+		http.Error(w, "Error al decodificar la solicitud", http.StatusBadRequest)
+		log.Printf("Error al decodificar la solicitud: %v", err)
+		return
+	}
+
+	log.Printf("Creando estudio: %+v", estudio)
+	err = CreateEstudio(estudio, db)
+	if err != nil {
+		http.Error(w, "Error al guardar el estudio", http.StatusInternalServerError)
+		log.Printf("Error al guardar el estudio: %v", err)
+		return
+	}
+
+	// Generar el PDF con todos los detalles de los estudios
+	pdfBuffer, err := GeneraPDF(estudio)
+	if err != nil {
+		http.Error(w, "Error al generar el PDF", http.StatusInternalServerError)
+		log.Printf("Error al generar el PDF: %v", err)
+		return
+	}
+
+	// Enviar el correo con el PDF adjunto
+	err = EnviaCorreoPDF(estudio, pdfBuffer)
+	if err != nil {
+		http.Error(w, "Error al enviar el correo", http.StatusInternalServerError)
+		log.Printf("Error al enviar el correo: %v", err)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte("Estudio guardado y correo enviado correctamente"))
+	log.Println("Estudio guardado y correo enviado correctamente")
+}
+
 // Handler para obtener estudios con filtros opcionales
-func (h *Handler) GetEstudios(w http.ResponseWriter, r *http.Request) {
+func GetEstudiosHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
 		log.Printf("Método no permitido: %s", r.Method)
@@ -522,7 +503,7 @@ func (h *Handler) GetEstudios(w http.ResponseWriter, r *http.Request) {
 		"FechaRecepcion": r.URL.Query().Get("FechaRecepcion"),
 	}
 
-	estudios, err := GetEstudios(filtros, h.Service.DB)
+	estudios, err := GetEstudios(filtros, db)
 	if err != nil {
 		http.Error(w, "Error al obtener los estudios", http.StatusInternalServerError)
 		log.Printf("Error al obtener los estudios: %v", err)
@@ -537,7 +518,7 @@ func (h *Handler) GetEstudios(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *Handler) ConfirmarDigitalizacion(w http.ResponseWriter, r *http.Request) {
+func ConfirmarDigitalizacionHandler(w http.ResponseWriter, r *http.Request) {
 	// Decodificar el cuerpo de la solicitud para obtener el correo
 	var requestData RequestData
 	err := json.NewDecoder(r.Body).Decode(&requestData)

@@ -72,3 +72,30 @@ type DiagnosticoMetadata struct {
 	Observaciones string    `bson:"observaciones"`
 	Fecha         time.Time `bson:"fecha_Emision"`
 }
+
+// Estructura para representar un estudio
+type DetalleEstudioI struct {
+	TipoEstudio      string `json:"tipoEstudio"`
+	CantidadImagenes int    `json:"cantidadImagenes"`
+	EsDonacion       bool   `json:"esDonacion"`
+	Observaciones    string `json:"observaciones"`
+	Id               int    `json:"id"`
+}
+
+type EstudioI struct {
+	Folio            string            `json:"folio"`
+	FechaRecepcion   time.Time         `json:"fechaRecepcion"`
+	FechaDevolucion  *time.Time        `json:"fechaDevolucion,omitempty"`
+	Correo           string            `json:"correo"`
+	CURP             string            `json:"curp"`
+	Carrera          string            `json:"carrera"`
+	Cuatrimestre     string            `json:"cuatrimestre"`
+	Area             string            `json:"area"`
+	DetallesEstudios []DetalleEstudioI `json:"detallesEstudios"`
+}
+
+type RequestDataI struct {
+	Correo string `json:"correo"`
+	Fecha  string `json:"fecha"`
+	Folio  string `json:"folio"`
+}

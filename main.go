@@ -42,8 +42,6 @@ func main() {
 
 	// Crear un enrutador y configurar rutas
 	r := mux.NewRouter()
-	service := services.NewEstudioService(db)
-	handler := services.NewHandler(service)
 
 	// Definir las rutas
 	r.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
@@ -105,9 +103,17 @@ func main() {
 		Handl.DatasetPredeterminadoHandler(w, r)
 	}).Methods("GET")
 
-	r.HandleFunc("/api/estudios", handler.CreateEstudio)
-	r.HandleFunc("/api/estudios/consulta", handler.GetEstudios)
-	r.HandleFunc("/api/estudios/confirmar-digitalizacion", handler.ConfirmarDigitalizacion)
+	r.HandleFunc("/api/estudios", func(w http.ResponseWriter, r *http.Request) {
+		services.CreateEstudioHandler(w, r, db)
+	}).Methods("POST")
+
+	r.HandleFunc("/api/estudios/consulta", func(w http.ResponseWriter, r *http.Request) {
+		services.GetEstudiosHandler(w, r, db)
+	}).Methods("GET")
+
+	r.HandleFunc("/api/estudios/confirmar-digitalizacion", func(w http.ResponseWriter, r *http.Request) {
+		services.ConfirmarDigitalizacionHandler(w, r)
+	}).Methods("POST")
 
 	// Aplicar el middleware de logging y CORS
 	r.Use(middleware.LoggingMiddleware) // Aplica LoggingMiddleware a todas las rutas
