@@ -335,9 +335,9 @@ func GetEstudios(filtros map[string]interface{}, db *sql.DB) ([]Estudio, error) 
 		args = append(args, correo)
 	}
 	if curp, ok := filtros["curp"].(string); ok && curp != "" {
-		log.Printf("Añadiendo filtro para 'curp': %s", curp)
-		conditions = append(conditions, fmt.Sprintf("e.curp = $%d", len(args)+1))
-		args = append(args, curp)
+		log.Printf("Añadiendo filtro para búsqueda parcial de 'curp': %s", curp)
+		conditions = append(conditions, fmt.Sprintf("e.curp ILIKE $%d", len(args)+1))
+		args = append(args, "%"+curp+"%") // Agregar comodines para búsqueda parcial
 	}
 	if fechaRecepcion, ok := filtros["FechaRecepcion"].(string); ok && fechaRecepcion != "" {
 		log.Printf("Añadiendo filtro para 'fecha_recepcion': %s", fechaRecepcion)
