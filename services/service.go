@@ -84,34 +84,34 @@ func ExisteCorreo(db *sql.DB, email string) (bool, error) {
 }
 
 // ValidarUsuario verifica las credenciales del usuario y devuelve el ID del usuario si son válidas.
-func ValidarUsuario(db *sql.DB, correo, contrasena string) (bool, int, string, string, error) {
+func ValidarUsuario(db *sql.DB, correo, contrasena string) (bool, int, string, string, string, error) {
 	log.Printf("Validando usuario con correo: %s", correo)
 
 	if correo == "" || contrasena == "" {
 		log.Printf("Correo o contraseña vacíos")
-		return false, 0, "", "", fmt.Errorf("correo o contraseña vacíos")
+		return false, 0, "", "", "", fmt.Errorf("correo o contraseña vacíos")
 	}
 
 	var user models.User
-	query := `SELECT id_usuario, contrasena, curp, rol FROM usuarios WHERE correo = $1`
-	err := db.QueryRow(query, correo).Scan(&user.ID, &user.Contrasena, &user.Curp, &user.Rol)
+	query := `SELECT id_usuario, contrasena, curp, rol, nombre FROM usuarios WHERE correo = $1`
+	err := db.QueryRow(query, correo).Scan(&user.ID, &user.Contrasena, &user.Curp, &user.Rol, &user.Nombre)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			log.Printf("Usuario no encontrado para el correo: %s", correo)
-			return false, 0, "", "", nil
+			return false, 0, "", "", "", nil
 		}
 		log.Printf("Error al buscar usuario con correo %s: %v", correo, err)
-		return false, 0, "", "", fmt.Errorf("error al buscar usuario: %v", err)
+		return false, 0, "", "", "", fmt.Errorf("error al buscar usuario: %v", err)
 	}
 
 	err = bcrypt.CompareHashAndPassword([]byte(user.Contrasena), []byte(contrasena))
 	if err != nil {
 		log.Printf("Contraseña incorrecta para el usuario con correo: %s", correo)
-		return false, 0, "", "", nil
+		return false, 0, "", "", "", nil
 	}
 
 	log.Printf("Usuario validado correctamente: %s", correo)
-	return true, user.ID, user.Curp, user.Rol, nil
+	return true, user.ID, user.Curp, user.Rol, user.Nombre, nil
 }
 
 // Cambiar la contraseña del usuario
@@ -136,7 +136,7 @@ func ChangePassword(db *sql.DB, email, currentPassword, newPassword string) erro
 		return errors.New("correo no encontrado")
 	}
 
-	valid, _, _, _, err := ValidarUsuario(db, email, currentPassword)
+	valid, _, _, _, _, err := ValidarUsuario(db, email, currentPassword)
 	if err != nil {
 		return err
 	}
@@ -477,12 +477,24 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 		defer file.Close()
 
 		// Guardar el archivo temporalmente
+		// Guardar el archivo temporalmente
 		tempFilePath := "../archivos/" + fileHeader.Filename
+
+		// Crear el directorio si no existe
+		if _, err := os.Stat("../archivos"); os.IsNotExist(err) {
+			err = os.MkdirAll("../archivos", os.ModePerm)
+			if err != nil {
+				log.Println("Error al crear el directorio:", err)
+				http.Error(w, "Error al preparar el almacenamiento", http.StatusInternalServerError)
+				return err
+			}
+		}
+
 		tempFile, err := os.Create(tempFilePath)
 		if err != nil {
 			log.Println("Error al crear el archivo temporal:", err)
 			http.Error(w, "Error al crear el archivo temporal", http.StatusInternalServerError)
-			continue
+			return err
 		}
 		defer tempFile.Close()
 
@@ -490,7 +502,7 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 		if err != nil {
 			log.Println("Error al copiar el archivo:", err)
 			http.Error(w, "Error al copiar el archivo", http.StatusInternalServerError)
-			continue
+			return err
 		}
 
 		log.Printf("Archivo guardado temporalmente en: %s\n", tempFilePath)
@@ -568,7 +580,7 @@ func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.
 		EstudioID: estudioID,
 		Donador:   donador,
 		Hash:      hash,
-		Status:    0,
+		Status:    1,
 		Imagenes:  imagenes,
 		Diagnostico: []models.Diagnostico{
 			{

@@ -74,7 +74,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
-	isValid, id, curp, rol, authErr := services.ValidarUsuario(db, credentials.Correo, credentials.Contrasena)
+	isValid, id, curp, rol, nombre, authErr := services.ValidarUsuario(db, credentials.Correo, credentials.Contrasena)
 	if authErr != nil {
 		http.Error(w, `{"error": "Error interno del servidor"}`, http.StatusInternalServerError)
 		return
@@ -91,6 +91,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		"id":      string(id),
 		"curp":    curp,
 		"rol":     rol,
+		"nombre":  nombre,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
