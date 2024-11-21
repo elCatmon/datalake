@@ -126,8 +126,14 @@ func main() {
 		handlers.AllowedHeaders([]string{"Content-Type", "Authorization"}),                    // Incluye Authorization si lo necesitas
 	)(r)
 
-	// Iniciar el servidor
-	log.Println("Servidor escuchando en http://localhost:8080...")
-	log.Fatal(http.ListenAndServe(":8080", corsHandler))
+	// Crear la instancia del servidor HTTP con configuración adicional
+	server := &http.Server{
+		Addr:           ":8080",     // Ajusta el puerto
+		Handler:        corsHandler, // Handler configurado con CORS
+		MaxHeaderBytes: 1 << 30,     // 1 GB para encabezados
+	}
 
+	// Iniciar el servidor HTTP con configuración personalizada
+	log.Println("Servidor escuchando en http://localhost:8080...")
+	log.Fatal(server.ListenAndServe()) // Usa ListenAndServe del servidor configurado
 }

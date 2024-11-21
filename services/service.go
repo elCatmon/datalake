@@ -438,7 +438,7 @@ func ProcesarDonacionFisica(w http.ResponseWriter, r *http.Request) ([]interface
 func SubirDonacionDigital(w http.ResponseWriter, bucket *gridfs.Bucket, r *http.Request, database *mongo.Database) error {
 	log.Println("Iniciando procesamiento de donación digital...")
 
-	err := r.ParseMultipartForm(10 << 20) // Límite de 10MB por archivo
+	err := r.ParseMultipartForm(1 << 30) // Límite de 1GB por archivo
 	if err != nil {
 		log.Println("Error al procesar el formulario de archivos:", err)
 		http.Error(w, "Error al procesar los archivos", http.StatusBadRequest)
