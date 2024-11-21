@@ -108,9 +108,9 @@ func GeneraPDF(estudio Estudio) (*bytes.Buffer, error) {
 	pdf := gofpdf.New("P", "mm", "A4", "")
 	pdf.AddPage()
 
-	pdf.ImageOptions("./images/logo_bdmdm.png", 12, 10, 50, 15, false, gofpdf.ImageOptions{ImageType: "png", ReadDpi: true}, 0, "")
+	pdf.ImageOptions("./images/Logo_CONAHCYT.png", 12, 10, 50, 15, false, gofpdf.ImageOptions{ImageType: "png", ReadDpi: true}, 0, "")
 	pdf.ImageOptions("./images/logo_upp.png", 97, 10, 12, 15, false, gofpdf.ImageOptions{ImageType: "png", ReadDpi: true}, 0, "")
-	pdf.ImageOptions("./images/logo_citedi.png", 148, 10, 50, 15, false, gofpdf.ImageOptions{ImageType: "png", ReadDpi: true}, 0, "")
+	pdf.ImageOptions("./images/logo_citedi_ipn.png", 148, 10, 50, 15, false, gofpdf.ImageOptions{ImageType: "png", ReadDpi: true}, 0, "")
 
 	pdf.SetFont("Arial", "", 10)
 	pdf.Cell(50, 50, "Repositorio")
