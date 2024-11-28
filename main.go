@@ -122,7 +122,7 @@ func main() {
 
 	// Crear la instancia del servidor HTTP con configuración adicional
 	server := &http.Server{
-		Addr:           ":8081",     // Ajusta el puerto
+		Addr:           ":8080",     // Ajusta el puerto
 		Handler:        corsHandler, // Handler configurado con CORS
 		MaxHeaderBytes: 1 << 30,     // 1 GB para encabezados
 	}
