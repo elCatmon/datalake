@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"webservice/config"
 
 	"github.com/jung-kurt/gofpdf"
 	_ "github.com/lib/pq"
@@ -222,8 +223,8 @@ func GeneraPDF(estudio Estudio) (*bytes.Buffer, error) {
 func EnviaCorreoPDF(estudio Estudio, pdfBuffer *bytes.Buffer) error {
 	// Crear un nuevo mensaje de correo
 	m := gomail.NewMessage()
-	m.SetHeader("From", os.Getenv("SMTP_EMAIL")) // Email remitente desde el entorno
-	m.SetHeader("To", estudio.Correo)            // Email destinatario
+	m.SetHeader("From", config.GetSMail()) // Email remitente desde el entorno
+	m.SetHeader("To", estudio.Correo)      // Email destinatario
 	m.SetHeader("Subject", "Registro de donación")
 	m.SetBody("text/plain", "Adjunto encontrarás el PDF con los detalles de tu registro.")
 	m.Attach("registro.pdf", gomail.SetCopyFunc(func(w io.Writer) error {
@@ -282,10 +283,10 @@ func EnviaCorreoConfirmacion(correo string, fecha string, folio string) error {
 	m.SetBody("text/html", mensaje)
 
 	// Leer la configuración del servidor de correo desde las variables de entorno
-	smtpServer := os.Getenv("SMTP_SERVER")
-	smtpPort := os.Getenv("SMTP_PORT")
-	smtpEmail := os.Getenv("SMTP_EMAIL")
-	smtpPassword := os.Getenv("SMTP_PASSWORD")
+	smtpServer := config.GetSServer()
+	smtpPort := config.GetSP()
+	smtpEmail := config.GetSMail()
+	smtpPassword := config.GetSPD()
 
 	// Convertir el puerto SMTP de string a int
 	port, err := strconv.Atoi(smtpPort)

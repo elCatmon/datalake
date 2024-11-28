@@ -5,11 +5,9 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/gorilla/handlers" // Importa el paquete de handlers
 	"github.com/gorilla/mux"
-	"github.com/joho/godotenv"
 
 	"webservice/Handl"
 	"webservice/config"
@@ -18,10 +16,6 @@ import (
 )
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatalf("Error cargando el archivo .env: %v", err)
-	}
 
 	// Inicializar la base de datos y el cliente MongoDB
 	client, database, bucket := config.InitializeMongoDBClient()
@@ -33,7 +27,7 @@ func main() {
 		log.Println("Desconexión de MongoDB exitosa.")
 	}()
 
-	connStr := os.Getenv("POSTGRES_CONNECTION")
+	connStr := config.GetPC()
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		log.Fatalf("Error al conectar con la base de datos: %v", err)
@@ -128,7 +122,7 @@ func main() {
 
 	// Crear la instancia del servidor HTTP con configuración adicional
 	server := &http.Server{
-		Addr:           ":8080",     // Ajusta el puerto
+		Addr:           ":8081",     // Ajusta el puerto
 		Handler:        corsHandler, // Handler configurado con CORS
 		MaxHeaderBytes: 1 << 30,     // 1 GB para encabezados
 	}
