@@ -5,11 +5,9 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/gorilla/handlers" // Importa el paquete de handlers
 	"github.com/gorilla/mux"
-	"github.com/joho/godotenv"
 
 	"webservice/Handl"
 	"webservice/config"
@@ -18,10 +16,6 @@ import (
 )
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatalf("Error cargando el archivo .env: %v", err)
-	}
 
 	// Inicializar la base de datos y el cliente MongoDB
 	client, database, bucket := config.InitializeMongoDBClient()
@@ -33,7 +27,7 @@ func main() {
 		log.Println("Desconexión de MongoDB exitosa.")
 	}()
 
-	connStr := os.Getenv("POSTGRES_CONNECTION")
+	connStr := config.GetPC()
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		log.Fatalf("Error al conectar con la base de datos: %v", err)
@@ -42,24 +36,22 @@ func main() {
 
 	// Crear un enrutador y configurar rutas
 	r := mux.NewRouter()
-	service := services.NewEstudioService(db)
-	handler := services.NewHandler(service)
 
 	// Definir las rutas
 	r.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-		Handl.RegisterHandler(w, r, database)
+		Handl.RegisterHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-		Handl.LoginHandler(w, r, database)
+		Handl.LoginHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/verificarcorreo", func(w http.ResponseWriter, r *http.Request) {
-		Handl.VerificarCorreoHandler(w, r, database)
+		Handl.VerificarCorreoHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/cambiocontrasena", func(w http.ResponseWriter, r *http.Request) {
-		Handl.CambiarContrasenaHandler(w, r, database)
+		Handl.CambiarContrasenaHandler(w, r, db)
 	}).Methods("POST")
 
 	r.HandleFunc("/donacion", func(w http.ResponseWriter, r *http.Request) {
@@ -105,9 +97,17 @@ func main() {
 		Handl.DatasetPredeterminadoHandler(w, r)
 	}).Methods("GET")
 
-	r.HandleFunc("/api/estudios", handler.CreateEstudio)
-	r.HandleFunc("/api/estudios/consulta", handler.GetEstudios)
-	r.HandleFunc("/api/estudios/confirmar-digitalizacion", handler.ConfirmarDigitalizacion)
+	r.HandleFunc("/api/estudios", func(w http.ResponseWriter, r *http.Request) {
+		services.CreateEstudioHandler(w, r, db)
+	}).Methods("POST")
+
+	r.HandleFunc("/api/estudios/consulta", func(w http.ResponseWriter, r *http.Request) {
+		services.GetEstudiosHandler(w, r, db)
+	}).Methods("GET")
+
+	r.HandleFunc("/api/estudios/confirmar-digitalizacion", func(w http.ResponseWriter, r *http.Request) {
+		services.ConfirmarDigitalizacionHandler(w, r)
+	}).Methods("POST")
 
 	// Aplicar el middleware de logging y CORS
 	r.Use(middleware.LoggingMiddleware) // Aplica LoggingMiddleware a todas las rutas
@@ -120,8 +120,14 @@ func main() {
 		handlers.AllowedHeaders([]string{"Content-Type", "Authorization"}),                    // Incluye Authorization si lo necesitas
 	)(r)
 
-	// Iniciar el servidor
-	log.Println("Servidor escuchando en http://localhost:8080...")
-	log.Fatal(http.ListenAndServe(":8080", corsHandler))
+	// Crear la instancia del servidor HTTP con configuración adicional
+	server := &http.Server{
+		Addr:           ":8080",     // Ajusta el puerto
+		Handler:        corsHandler, // Handler configurado con CORS
+		MaxHeaderBytes: 1 << 30,     // 1 GB para encabezados
+	}
 
+	// Iniciar el servidor HTTP con configuración personalizada
+	log.Println("Servidor escuchando en http://localhost:8080...")
+	log.Fatal(server.ListenAndServe()) // Usa ListenAndServe del servidor configurado
 }

@@ -3,6 +3,7 @@ package Handl
 import (
 	"archive/zip"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,7 +26,7 @@ import (
 )
 
 // RegisterHandler maneja la solicitud de registro de un nuevo usuario.
-func RegisterHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+func RegisterHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	w.Header().Set("Content-Type", "application/json")
 	var newUser models.User
 	err := json.NewDecoder(r.Body).Decode(&newUser)
@@ -65,7 +66,7 @@ func RegisterHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database)
 }
 
 // LoginHandler maneja la solicitud de inicio de sesión del usuario.
-func LoginHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+func LoginHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var credentials models.User
 	err := json.NewDecoder(r.Body).Decode(&credentials)
 	if err != nil {
@@ -73,7 +74,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 		return
 	}
 
-	isValid, id, curp, rol, authErr := services.ValidarUsuario(db, credentials.Correo, credentials.Contrasena)
+	isValid, id, curp, rol, nombre, authErr := services.ValidarUsuario(db, credentials.Correo, credentials.Contrasena)
 	if authErr != nil {
 		http.Error(w, `{"error": "Error interno del servidor"}`, http.StatusInternalServerError)
 		return
@@ -87,9 +88,10 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 	// Incluir el rol en la respuesta
 	response := map[string]string{
 		"message": "Inicio de sesión exitoso",
-		"id":      id,
+		"id":      string(id),
 		"curp":    curp,
 		"rol":     rol,
+		"nombre":  nombre,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -99,7 +101,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
 }
 
 // Manejador para verificar si existe un usuario con el correo proporcionado
-func VerificarCorreoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+func VerificarCorreoHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var req struct {
 		Email string `json:"email"`
 	}
@@ -122,7 +124,7 @@ func VerificarCorreoHandler(w http.ResponseWriter, r *http.Request, db *mongo.Da
 }
 
 // Manejador para cambiar la contraseña
-func CambiarContrasenaHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database) {
+func CambiarContrasenaHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	var req struct {
 		Email           string `json:"email"`
 		CurrentPassword string `json:"currentPassword"`
@@ -202,13 +204,13 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	// Parsear parámetros de página
 	page, err := strconv.Atoi(pageStr)
 	if err != nil || page < 1 {
-		page = 1 // Página por defecto si el parámetro es inválido
+		page = 1 // Página por defecto
 	}
 
 	// Parsear parámetros de límite
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit < 1 {
-		limit = 18 // Límite por defecto si el parámetro es inválido
+		limit = 9 // Límite por defecto
 	}
 
 	// Crear filtro para los estudios
@@ -218,17 +220,28 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 		return
 	}
 
-	// Buscar estudios
+	// Contar el total de documentos que cumplen el filtro
+	total, err := studiesCollection.CountDocuments(context.Background(), filter)
+	if err != nil {
+		http.Error(w, "Error al contar documentos: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Buscar estudios y obtener los tres valores
 	imageIDs, cursor, err := services.BuscarEstudios(w, studiesCollection, filter)
 	if err != nil {
-		return // Al hacer http.Error, simplemente retornamos
+		return
 	}
-	defer cursor.Close(context.Background()) // Cerrar el cursor después de su uso
+	defer cursor.Close(context.Background()) // Cerrar el cursor al final
 
 	// Si no hay IDs de imagen, devolver una lista vacía
 	if len(imageIDs) == 0 {
+		response := map[string]interface{}{
+			"images": []string{},
+			"total":  0,
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]string{}) // No es necesario usar http.Error aquí
+		json.NewEncoder(w).Encode(response)
 		return
 	}
 
@@ -236,8 +249,12 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	start := (page - 1) * limit
 	end := start + limit
 	if start >= len(imageIDs) {
+		response := map[string]interface{}{
+			"images": []string{},
+			"total":  total,
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]string{}) // No es necesario usar http.Error aquí
+		json.NewEncoder(w).Encode(response)
 		return
 	}
 	if end > len(imageIDs) {
@@ -248,12 +265,16 @@ func ThumbnailHandler(w http.ResponseWriter, r *http.Request, db *mongo.Database
 	// Buscar imágenes
 	images, err := services.BuscarImagenes(w, paginatedImageIDs, db)
 	if err != nil {
-		return // Al hacer http.Error, simplemente retornamos
+		return
 	}
 
-	// Devolver la lista de URLs de las miniaturas
+	// Respuesta con imágenes y total
+	response := map[string]interface{}{
+		"images": images,
+		"total":  total,
+	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(images); err != nil {
+	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "Error al escribir la respuesta: "+err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -430,7 +451,7 @@ func DatasetHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 // DescargarDatasetHandler es el handler que maneja la descarga del dataset
 func DatasetPredeterminadoHandler(w http.ResponseWriter, r *http.Request) {
 	// Llamar al servicio que retorna la ruta del dataset generado
-	datasetPath := "./dataset/dataset_dcm_2024-10.zip"
+	datasetPath := "./dataset/dataset.zip"
 
 	// Extraer el nombre del archivo a partir de la ruta
 	fileName := filepath.Base(datasetPath)

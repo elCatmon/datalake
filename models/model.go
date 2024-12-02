@@ -8,14 +8,14 @@ import (
 
 // User representa un usuario en la base de datos.
 type User struct {
-	ID         primitive.ObjectID `bson:"_id"`
-	Nombre     string             `bson:"nombre"`
-	Correo     string             `bson:"correo"`
-	Contrasena string             `bson:"contrasena"`
-	Curp       string             `bson:"curp"`
-	Estado     string             `bson:"estado"`
-	Municipio  string             `bson:"municipio"`
-	Rol        string             `bson:"rol"`
+	ID         int    `json:"id"`
+	Nombre     string `json:"nombre"`
+	Correo     string `json:"correo"`
+	Contrasena string `json:"contrasena"`
+	Curp       string `json:"curp"`
+	Estado     string `json:"estado"`
+	Municipio  string `json:"municipio"`
+	Rol        string `json:"rol"`
 }
 
 // Estructura para la solicitud de cambio de contraseña
@@ -71,4 +71,31 @@ type DiagnosticoMetadata struct {
 	Impresion     string    `bson:"impresion"`
 	Observaciones string    `bson:"observaciones"`
 	Fecha         time.Time `bson:"fecha_Emision"`
+}
+
+// Estructura para representar un estudio
+type DetalleEstudioI struct {
+	TipoEstudio      string `json:"tipoEstudio"`
+	CantidadImagenes int    `json:"cantidadImagenes"`
+	EsDonacion       bool   `json:"esDonacion"`
+	Observaciones    string `json:"observaciones"`
+	Id               int    `json:"id"`
+}
+
+type EstudioI struct {
+	Folio            string            `json:"folio"`
+	FechaRecepcion   time.Time         `json:"fechaRecepcion"`
+	FechaDevolucion  *time.Time        `json:"fechaDevolucion,omitempty"`
+	Correo           string            `json:"correo"`
+	CURP             string            `json:"curp"`
+	Carrera          string            `json:"carrera"`
+	Cuatrimestre     string            `json:"cuatrimestre"`
+	Area             string            `json:"area"`
+	DetallesEstudios []DetalleEstudioI `json:"detallesEstudios"`
+}
+
+type RequestDataI struct {
+	Correo string `json:"correo"`
+	Fecha  string `json:"fecha"`
+	Folio  string `json:"folio"`
 }

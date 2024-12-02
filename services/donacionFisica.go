@@ -2,6 +2,8 @@ package services
 
 import (
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"log"
 	"mime/multipart"
@@ -10,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"webservice/models"
+
+	"golang.org/x/image/draw"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -54,6 +58,7 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 		// Ruta para el archivo JPG modificado
 		jpgFilePath := fmt.Sprintf("./archivos/%s_M.jpg", NameWithoutExt)
 		// Guardar el archivo temporalmente
+
 		if err := guardarArchivoTemporal(fileHeader, jpgFilePath); err != nil {
 			http.Error(w, "Error al guardar archivo temporal", http.StatusInternalServerError)
 			log.Printf("Error al guardar archivo temporal: %v", err)
@@ -65,6 +70,15 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 			log.Printf("Error al convertir archivo a JPG: %v", err)
 			return
 		}
+
+		// Redimensionar la imagen a 150x150
+		redimensionadaPath := fmt.Sprintf("./archivos/%s.jpg", NameWithoutExt)
+		if err := RedimensionarImagen(jpgFilePath, redimensionadaPath); err != nil {
+			http.Error(w, "Error al redimensionar imagen", http.StatusInternalServerError)
+			log.Printf("Error al redimensionar imagen: %v", err)
+			return
+		}
+
 		// Subir archivo original a GridFS
 		fileID, err := subirArchivoCGridFS(jpgFilePath, bucket)
 		if err != nil {
@@ -117,6 +131,14 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 			return
 		}
 
+		// Redimensionar la imagen a 150x150
+		redimensionadaPath := fmt.Sprintf("./archivos/%s.jpg", ONameWithoutExt)
+		if err := RedimensionarImagen(OtempFilePath, redimensionadaPath); err != nil {
+			http.Error(w, "Error al redimensionar imagen", http.StatusInternalServerError)
+			log.Printf("Error al redimensionar imagen: %v", err)
+			return
+		}
+
 		// Subir archivo DICOM a GridFS
 		OdcmID, err := subirArchivoCGridFS(OdcmFilePath, bucket)
 		if err != nil {
@@ -124,12 +146,15 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 			log.Printf("Error al subir archivo DICOM: %v", err)
 			return
 		}
-		fileID, err := subirArchivoGridFS(fileHeader, bucket)
+
+		// Subir archivo redimensionado a GridFS
+		fileID, err := subirArchivoCGridFS(redimensionadaPath, bucket)
 		if err != nil {
-			http.Error(w, "Error al subir archivo original", http.StatusInternalServerError)
-			log.Printf("Error al subir archivo original: %v", err)
+			http.Error(w, "Error al subir archivo anonimizado", http.StatusInternalServerError)
+			log.Printf("Error al subir archivo anonimizado: %v", err)
 			return
 		}
+
 		// Limpiar archivos temporales
 		defer os.Remove(OtempFilePath)
 		defer os.Remove(OdcmFilePath)
@@ -170,6 +195,35 @@ func SubirDonacionFisica(datos []interface{}, w http.ResponseWriter, bucket *gri
 	}
 
 	log.Println("Donación física subida con éxito.")
+}
+
+// RedimensionarImagen redimensiona la imagen a un tamaño fijo con mejor interpolación.
+func RedimensionarImagen(inputPath, outputPath string) error {
+	inputFile, err := os.Open(inputPath)
+	if err != nil {
+		return fmt.Errorf("no se pudo abrir el archivo de entrada: %w", err)
+	}
+	defer inputFile.Close()
+
+	srcImage, _, err := image.Decode(inputFile)
+	if err != nil {
+		return fmt.Errorf("no se pudo decodificar la imagen: %w", err)
+	}
+
+	dstRect := image.Rect(0, 0, 150, 150)
+	dstImage := image.NewRGBA(dstRect)
+	draw.CatmullRom.Scale(dstImage, dstRect, srcImage, srcImage.Bounds(), draw.Over, nil)
+
+	outputFile, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("no se pudo crear el archivo de salida: %w", err)
+	}
+	defer outputFile.Close()
+
+	if err := jpeg.Encode(outputFile, dstImage, nil); err != nil {
+		return fmt.Errorf("no se pudo codificar la imagen redimensionada: %w", err)
+	}
+	return nil
 }
 
 // Guardar archivo temporalmente
@@ -231,25 +285,4 @@ func convertirArchivoJPG(tempFilePath, jpgFilePath string) error {
 		return fmt.Errorf("error al ejecutar el script de conversión: %s: %w", output, err)
 	}
 	return nil
-}
-
-// Función para subir archivos a GridFS
-func subirArchivoGridFS(fileHeader *multipart.FileHeader, bucket *gridfs.Bucket) (string, error) {
-	file, err := fileHeader.Open()
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	uploadStream, err := bucket.OpenUploadStream(fileHeader.Filename)
-	if err != nil {
-		return "", err
-	}
-	defer uploadStream.Close()
-
-	_, err = io.Copy(uploadStream, file)
-	if err != nil {
-		return "", err
-	}
-	return uploadStream.FileID.(primitive.ObjectID).Hex(), nil
 }
