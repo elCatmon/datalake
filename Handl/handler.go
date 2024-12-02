@@ -451,7 +451,7 @@ func DatasetHandler(w http.ResponseWriter, r *http.Request, bucket *gridfs.Bucke
 // DescargarDatasetHandler es el handler que maneja la descarga del dataset
 func DatasetPredeterminadoHandler(w http.ResponseWriter, r *http.Request) {
 	// Llamar al servicio que retorna la ruta del dataset generado
-	datasetPath := "./dataset/dataset_dcm_2024-10.zip"
+	datasetPath := "./dataset/dataset.zip"
 
 	// Extraer el nombre del archivo a partir de la ruta
 	fileName := filepath.Base(datasetPath)

@@ -746,7 +746,6 @@ func BuscarDiagnosticoReciente(ctx context.Context, db *mongo.Database, id primi
 	if err != nil {
 		return nil, "", err
 	}
-
 	return &diagnosticoReciente, clave, nil
 }
 
