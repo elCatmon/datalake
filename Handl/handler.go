@@ -470,4 +470,25 @@ func DatasetPredeterminadoHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Copiar el contenido del archivo al ResponseWriter
 	http.ServeFile(w, r, datasetPath)
+
+}
+
+func GetDiagnosticoIAHandler(w http.ResponseWriter, r *http.Request) {
+	imagenID := r.URL.Query().Get("imagenid")
+	if imagenID == "" {
+		http.Error(w, "El nombre de la imagen es requerido", http.StatusBadRequest)
+		return
+	}
+
+	Hallazgos, Impresion, Observaciones, _ := services.ObtenerDiagnosticoIA(imagenID)
+	// Crear la respuesta con diagnóstico y clave
+	response := map[string]string{
+		"hallazgos":     Hallazgos,
+		"impresion":     Impresion,
+		"observaciones": Observaciones,
+	}
+
+	// Responder con el diagnóstico más reciente y la clave en formato JSON
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
 }

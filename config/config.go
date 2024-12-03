@@ -12,7 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-var ip string = "https://qt679b4s-8080.usw3.devtunnels.ms"
+var ip string = "http://192.168.240.21:8080"
 var POSTGRES_CONNECTION = "postgres://bdmdm:123456789@localhost:5432/bdmdm?sslmode=disable"
 var SMTP_SERVER = "smtp.gmail.com"
 var SMTP_PORT = "587"

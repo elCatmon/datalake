@@ -109,6 +109,10 @@ func main() {
 		services.ConfirmarDigitalizacionHandler(w, r)
 	}).Methods("POST")
 
+	r.HandleFunc("/api/diagnosticos/obtener-diagnostico", func(w http.ResponseWriter, r *http.Request) {
+		Handl.GetDiagnosticoIAHandler(w, r)
+	}).Methods("GET")
+
 	// Aplicar el middleware de logging y CORS
 	r.Use(middleware.LoggingMiddleware) // Aplica LoggingMiddleware a todas las rutas
 	r.Use(middleware.CORSMiddleware)    // Aplica CORSMiddleware a todas las rutas
