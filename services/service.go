@@ -224,46 +224,44 @@ func EncontrarImagen(bucket *gridfs.Bucket, filename string) (*gridfs.DownloadSt
 	return downloadStream, nil
 }
 
-// Crear filtro de búsqueda de estudios basados en la clave personalizada
 func CrearFiltro(w http.ResponseWriter, r *http.Request) (bson.M, error) {
 	tipoEstudio := r.URL.Query().Get("tipoEstudio")
 	region := r.URL.Query().Get("region")
 	proyeccion := r.URL.Query().Get("proyeccion")
 
-	// Crear el filtro de búsqueda para estudios con los filtros obligatorios
+	// Construir el regex combinado a partir de los parámetros
+	regexCombinado := "^" + tipoEstudio // Empezamos con el filtro obligatorio de tipoEstudio
+
+	// Construir filtro para región
+	if region != "" {
+		// Si la región es 02, incluir 02, 03, 04, 05, 06
+		if region == "02" {
+			regexCombinado += "(02|03|04|05|06)"
+		} else {
+			regexCombinado += region
+		}
+	}
+
+	// Agregar la proyección si está presente
+	if proyeccion != "" {
+		regexCombinado += proyeccion
+	}
+
+	// Crear el filtro final
 	filter := bson.M{
 		"imagenes": bson.M{
 			"$elemMatch": bson.M{
 				"anonimizada": true, // Filtro obligatorio: imagen anonimizada
+				"clave": bson.M{
+					"$regex": regexCombinado, // Filtro para la clave dentro del elemento
+				},
 			},
 		},
 		"status": 1, // Filtro obligatorio: status activo
 	}
 
-	// Filtro obligatorio por tipo de estudio (primeros 2 dígitos de la clave)
-	if tipoEstudio != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^" + tipoEstudio, // Filtro por tipo de estudio
-		}
-	} else {
-		// Retornar error si el tipo de estudio no se especifica, ya que es obligatorio
-		return nil, fmt.Errorf("el campo tipoEstudio es obligatorio")
-	}
+	log.Println("Filtro creado:", filter)
 
-	// Filtros opcionales
-	// Filtro por región (3to y 4to dígito de la clave)
-	if region != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{2}" + region, // Filtra por región si está presente
-		}
-	}
-
-	// Filtro por proyección (8vo y 9no dígito de la clave)
-	if proyeccion != "" {
-		filter["imagenes.clave"] = bson.M{
-			"$regex": "^.{4}" + proyeccion, // Filtra por proyección si está presente
-		}
-	}
 	return filter, nil
 }
 
